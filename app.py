@@ -12,7 +12,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Iterable
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
@@ -543,7 +543,8 @@ def run_background_job(job_id: str, job_type: str, token: str, payload: dict[str
 
 @app.get("/")
 def home():
-    return jsonify({"status": "ok", "service": "sistema-maestro-pdf", "message": "Servidor en línea en Railway"}), 200
+    # Retorna la interfaz web creada en templates/index.html
+    return render_template("index.html")
 
 
 @app.get("/health")
