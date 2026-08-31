@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema Maestro - Gestor de PDFs</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background-color: #f4f6f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    .card-custom { border-radius: 12px; border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .header-bg { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; border-radius: 12px 12px 0 0; }
+    .badge-status { font-size: 0.9rem; padding: 6px 12px; border-radius: 20px; }
+  </style>
+</head>
+<body class="container py-4">
+
+  <div class="card card-custom mb-4">
+    <div class="header-bg p-4 d-flex justify-content-between align-items-center">
+      <div>
+        <h3 class="mb-0">📁 Sistema Maestro PDF</h3>
+        <small class="text-light">Plataforma Web Independiente (Railway Backend)</small>
+      </div>
+      <span id="server-status" class="badge bg-secondary badge-status">Verificando Servidor...</span>
+    </div>
+
+    <div class="card-body p-4">
+      
+      <!-- Token de Acceso OAuth -->
+      <div class="row mb-4">
+        <div class="col-md-12">
+          <label for="token" class="form-label fw-bold">Token de Autorización Google Drive / Bearer Token:</label>
+          <input type="password" id="token" class="form-control" placeholder="Pega tu token OAuth aquí...">
+        </div>
+      </div>
+
+      <hr>
+
+      <!-- Desplegable de Plantillas y Selección -->
+      <div class="row g-3 mb-4">
+        <div class="col-md-6">
+          <label for="select-plantilla" class="form-label fw-bold">1. Seleccionar Plantilla o Modo:</label>
+          <select id="select-plantilla" class="form-select" onchange="cambiarModo()">
+            <option value="compilar">Compilación General por Límite de Páginas (600 págs)</option>
+            <option value="tomos">Ensamblado de Tomos con Carátula</option>
+          </select>
+        </div>
+
+        <div class="col-md-6">
+          <label for="folder-id" class="form-label fw-bold">2. ID de Carpeta de Destino en Google Drive:</label>
+          <input type="text" id="folder-id" class="form-control" placeholder="Ej: 1A2b3C4d5E6f7G8h9I0j...">
+        </div>
+      </div>
+
+      <!-- Configuración de Archivos -->
+      <div class="row g-3 mb-4">
+        <div class="col-md-6" id="group-caratula" style="display: none;">
+          <label for="caratula-id" class="form-label fw-bold">ID del Archivo Carátula (PDF):</label>
+          <input type="text" id="caratula-id" class="form-control" placeholder="ID del PDF de la carátula...">
+        </div>
+
+        <div class="col-md-6">
+          <label for="output-name" class="form-label fw-bold">3. Nombre del Archivo de Salida:</label>
+          <input type="text" id="output-name" class="form-control" value="COMPILADO_MAESTRO.pdf">
+        </div>
+      </div>
+
+      <!-- Lista de IDs de archivos -->
+      <div class="mb-4">
+        <label for="file-ids" class="form-label fw-bold">4. IDs de Archivos Fuentes en Google Drive (Uno por línea):</label>
+        <textarea id="file-ids" class="form-control" rows="6" placeholder="Pega aquí la lista de IDs de PDFs que se van a procesar..."></textarea>
+      </div>
+
+      <!-- Botón de Ejecución -->
+      <div class="d-grid gap-2">
+        <button id="btn-ejecutar" class="btn btn-primary btn-lg" onclick="procesarOperacion()">🚀 Iniciar Compilación en Railway</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Panel de Progreso y Monitor -->
+  <div class="card card-custom p-4" id="panel-progreso" style="display: none;">
+    <h5 class="fw-bold mb-3">Estado del Trabajo en Segundo Plano</h5>
+    <div class="progress mb-3" style="height: 25px;">
+      <div id="bar-progreso" class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" style="width: 0%;">0%</div>
+    </div>
+    <div id="log-status" class="alert alert-info mb-0">Enviando solicitud a Railway...</div>
+  </div>
+
+  <script>
+    // Verificar estado del servidor al cargar la página
+    window.onload = async () => {
+      try {
+        const res = await fetch('/health');
+        if (res.ok) {
+          document.getElementById('server-status').className = 'badge bg-success badge-status';
+          document.getElementById('server-status').innerText = 'Servidor En Línea 🟢';
+        }
+      } catch (e) {
+        document.getElementById('server-status').className = 'badge bg-danger badge-status';
+        document.getElementById('server-status').innerText = 'Servidor Desconectado 🔴';
+      }
+    };
+
+    function cambiarModo() {
+      const modo = document.getElementById('select-plantilla').value;
+      const groupCaratula = document.getElementById('group-caratula');
+      groupCaratula.style.display = (modo === 'tomos') ? 'block' : 'none';
+    }
+
+    async function procesarOperacion() {
+      const token = document.getElementById('token').value.trim();
+      const folderId = document.getElementById('folder-id').value.trim();
+      const outputName = document.getElementById('output-name').value.trim();
+      const modo = document.getElementById('select-plantilla').value;
+      const fileIdsRaw = document.getElementById('file-ids').value.trim();
+
+      if (!token || !folderId || !fileIdsRaw) {
+        alert('Por favor completa el Token, la Carpeta de Destino y los IDs de los archivos.');
+        return;
+      }
+
+      const fileIds = fileIdsRaw.split('\n').map(id => id.trim()).filter(id => id.length > 0);
+      const btn = document.getElementById('btn-ejecutar');
+      btn.disabled = true;
+
+      const panel = document.getElementById('panel-progreso');
+      const logStatus = document.getElementById('log-status');
+      const bar = document.getElementById('bar-progreso');
+      panel.style.display = 'block';
+      bar.style.width = '10%';
+      bar.innerText = 'Iniciando...';
+
+      const payload = {
+        file_ids: fileIds,
+        destination_folder_id: folderId,
+        output_filename: outputName,
+        modo_async: true
+      };
+
+      if (modo === 'tomos') {
+        payload.caratula_id = document.getElementById('caratula-id').value.trim();
+      }
+
+      try {
+        const endpoint = (modo === 'tomos') ? '/tomos' : '/compilar';
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Error en la petición');
+
+        const jobId = data.job_id;
+        logStatus.innerText = `Trabajo recibido. ID: ${jobId}. Procesando en servidor...`;
+        
+        // Monitorear progreso
+        monitorearTrabajo(jobId, token);
+
+      } catch (err) {
+        logStatus.className = 'alert alert-danger';
+        logStatus.innerText = `Error: ${err.message}`;
+        btn.disabled = false;
+      }
+    }
+
+    async function monitorearTrabajo(jobId, token) {
+      const logStatus = document.getElementById('log-status');
+      const bar = document.getElementById('bar-progreso');
+      const btn = document.getElementById('btn-ejecutar');
+
+      const interval = setInterval(async () => {
+        try {
+          const res = await fetch(`/trabajos/${jobId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const data = await res.json();
+
+          if (data.job_state === 'running') {
+            const processed = data.progress.processed_files || 0;
+            const total = data.progress.total_files || 1;
+            const pct = Math.round((processed / total) * 100);
+            bar.style.width = `${pct}%`;
+            bar.innerText = `${pct}%`;
+            logStatus.innerText = `Procesando archivo ${processed} de ${total}...`;
+          } else if (data.job_state === 'finished') {
+            clearInterval(interval);
+            bar.style.width = '100%';
+            bar.innerText = '100%';
+            logStatus.className = 'alert alert-success';
+            logStatus.innerText = '¡Proceso completado con éxito! Los archivos ya están guardados en tu Google Drive.';
+            btn.disabled = false;
+          } else if (data.job_state === 'failed') {
+            clearInterval(interval);
+            logStatus.className = 'alert alert-danger';
+            logStatus.innerText = `Falló la compilación: ${data.detail || 'Error desconocido'}`;
+            btn.disabled = false;
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }, 3000);
+    }
+  </script>
+</body>
+</html>
