@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel Maestro Integrado</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --primary-light: #eff6ff;
+      --accent-orange: #d97706;
+      --accent-orange-hover: #b45309;
+      --accent-purple: #9333ea;
+      --accent-purple-hover: #7e22ce;
+      --success: #16a34a;
+      --success-bg: #dcfce7;
+      --warning: #b45309;
+      --warning-bg: #fef3c7;
+      --danger: #dc2626;
+      --danger-bg: #fee2e2;
+      --info-bg: #f0f9ff;
+      --info-border: #bae6fd;
+      --bg-main: #f1f5f9;
+      --bg-card: #ffffff;
+      --bg-subtle: #f8fafc;
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-light: #94a3b8;
+      --border: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+    body { background-color: var(--bg-main); color: var(--text-main); font-size: 13px; line-height: 1.4; -webkit-font-smoothing: antialiased; }
+
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg-subtle); }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+
+    /* LOGIN */
+    .login-container { display: flex; justify-content: center; align-items: center; min-height: 100vh; background: radial-gradient(circle at top, #ffffff, var(--bg-main)); padding: 20px; }
+    .login-card { background: var(--bg-card); width: 100%; max-width: 390px; padding: 40px 32px; border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); border: 1px solid var(--border); text-align: center; }
+    .login-icon { width: 52px; height: 52px; background: var(--primary); color: #ffffff; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 22px; }
+    .login-card h2 { font-size: 20px; font-weight: 700; color: var(--text-main); margin-bottom: 4px; }
+    .login-card .subtitle { color: var(--text-light); font-size: 13px; margin-bottom: 24px; }
+    .input-group { text-align: left; margin-bottom: 16px; }
+    .input-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+    .input-wrapper { position: relative; display: flex; align-items: center; }
+    .input-wrapper i { position: absolute; left: 12px; color: var(--text-light); font-size: 14px; }
+    .input-wrapper input, .form-input, .form-select { width: 100%; padding: 9px 12px 9px 36px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 12.5px; outline: none; }
+    .form-input, .form-select { padding-left: 12px; }
+
+    /* DASHBOARD LAYOUT */
+    .dashboard-container { display: flex; flex-direction: column; min-height: 100vh; }
+    .main-header { height: 56px; background: var(--bg-card); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 20px; position: sticky; top: 0; z-index: 100; }
+    .header-left { display: flex; align-items: center; gap: 16px; }
+    .btn-icon { background: none; border: none; color: var(--text-muted); font-size: 16px; cursor: pointer; padding: 6px; border-radius: var(--radius-sm); }
+    .btn-icon:hover { background: var(--bg-subtle); color: var(--text-main); }
+    .system-title { font-size: 16px; font-weight: 700; color: var(--text-main); }
+    .header-right { display: flex; align-items: center; gap: 20px; }
+    .header-action { position: relative; color: var(--text-muted); font-size: 17px; cursor: pointer; }
+    .header-action .badge { position: absolute; top: -6px; right: -8px; background: var(--danger); color: #ffffff; font-size: 10px; font-weight: 700; border-radius: 10px; padding: 1px 5px; border: 2px solid var(--bg-card); }
+    .user-profile { display: flex; align-items: center; gap: 10px; }
+    .avatar { width: 32px; height: 32px; background: var(--text-main); color: #ffffff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; }
+    .user-info { display: flex; flex-direction: column; }
+    .user-name { font-weight: 600; font-size: 12px; color: var(--text-main); }
+    .user-role { font-size: 10px; color: var(--text-light); }
+
+    .app-body { display: flex; flex: 1; }
+    .sidebar { width: 230px; background: var(--bg-card); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 16px 0; }
+    .nav-section { margin-bottom: 18px; }
+    .nav-label { font-size: 10px; font-weight: 700; color: var(--text-light); padding: 0 20px 8px; letter-spacing: 0.5px; }
+    .nav-item { display: flex; align-items: center; padding: 9px 20px; color: var(--text-muted); text-decoration: none; font-size: 12.5px; font-weight: 500; gap: 12px; transition: all 0.15s ease; border-left: 3px solid transparent; }
+    .nav-item i { width: 16px; font-size: 14px; }
+    .nav-item:hover { background: var(--bg-subtle); color: var(--primary); }
+    .nav-item.active { background: var(--primary-light); color: var(--primary); border-left-color: var(--primary); font-weight: 600; }
+    .nav-badge { margin-left: auto; background: var(--border); color: var(--text-muted); font-size: 10px; padding: 2px 7px; border-radius: 10px; font-weight: 700; }
+    .sidebar-footer { margin-top: auto; border-top: 1px solid var(--border); padding-top: 10px; }
+    .logout-link { color: var(--danger); }
+    .logout-link:hover { background: var(--danger-bg); color: var(--danger); }
+
+    .main-content { flex: 1; padding: 24px; overflow-y: auto; }
+    .grid-layout { display: grid; grid-template-columns: 430px 1fr; gap: 20px; }
+    .grid-full { grid-column: 1 / -1; }
+    .card { background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border); padding: 20px; box-shadow: var(--shadow-sm); }
+    .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .card-header h2 { font-size: 15px; font-weight: 700; color: var(--text-main); }
+    .card-subtitle { font-size: 11px; color: var(--text-light); margin-top: 2px; }
+    .btn-refresh { color: var(--text-light); cursor: pointer; font-size: 13px; transition: color 0.15s; }
+    .btn-refresh:hover { color: var(--text-main); }
+
+    /* BOTONES & STEPS */
+    .btn-primary, .btn-secondary, .btn-action-orange, .btn-action-purple { border: none; border-radius: var(--radius-sm); font-weight: 600; font-size: 12px; padding: 9px 14px; cursor: pointer; transition: background 0.15s; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+    .btn-primary { background: var(--primary); color: #ffffff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-secondary { background: #ffffff; border: 1px solid var(--border-strong); color: var(--text-muted); }
+    .btn-secondary:hover { background: var(--bg-subtle); color: var(--text-main); }
+    .btn-action-orange { background: var(--accent-orange); color: #ffffff; }
+    .btn-action-orange:hover { background: var(--accent-orange-hover); }
+    .btn-action-purple { background: var(--accent-purple); color: #ffffff; }
+    .btn-action-purple:hover { background: var(--accent-purple-hover); }
+    .btn-block { width: 100%; }
+
+    .steps-tabs { display: flex; background: var(--bg-subtle); border-radius: var(--radius-md); padding: 4px; margin-bottom: 14px; border: 1px solid var(--border); }
+    .step-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 7px 0; cursor: pointer; border-radius: var(--radius-sm); font-weight: 600; font-size: 12px; color: var(--text-light); transition: all 0.15s; }
+    .step-number { width: 22px; height: 22px; border-radius: 50%; background: var(--border-strong); color: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 11px; }
+    .step-tab.active { background: #ffffff; color: var(--accent-orange); box-shadow: var(--shadow-sm); }
+    .step-tab.active .step-number { background: var(--accent-orange); }
+
+    /* BANNERS, INPUTS & COMPONENTES DETALLADOS */
+    .info-banner { background: var(--info-bg); border: 1px solid var(--info-border); color: #0369a1; padding: 9px 12px; border-radius: var(--radius-sm); font-size: 11.5px; margin-bottom: 12px; }
+    .tree-container { max-height: 180px; overflow-y: auto; background: var(--bg-subtle); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 8px 10px; }
+    .tree-container ul { list-style: none; padding-left: 8px; }
+    .tree-node { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11.5px; color: var(--text-muted); }
+    .tree-node .toggle { color: var(--primary); font-weight: 700; cursor: pointer; }
+
+    .form-group { margin-top: 10px; }
+    .form-group label { display: block; font-size: 11.5px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; }
+    
+    .radio-group { display: flex; flex-direction: column; gap: 6px; }
+    .radio-option, .checkbox-option { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted); cursor: pointer; user-select: none; }
+    .radio-option input, .checkbox-option input { accent-color: var(--primary); }
+
+    .checkbox-box { padding: 10px 12px; border-radius: var(--radius-sm); }
+    .warning-box { background: var(--warning-bg); border: 1px solid #fef3c7; color: var(--warning); }
+
+    .purple-box { background: #faf5ff; border: 1px solid #e9d5ff; padding: 12px; border-radius: var(--radius-sm); }
+    .purple-box h4 { color: #6b21a8; font-size: 12px; font-weight: 700; }
+    .purple-box p { color: #7e22ce; font-size: 10.5px; margin-top: 2px; }
+
+    /* TABLAS */
+    .table-container { overflow-x: auto; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 11.5px; text-align: left; }
+    .data-table th { background: var(--bg-subtle); color: var(--text-muted); font-weight: 700; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 10.5px; letter-spacing: 0.3px; }
+    .data-table td { padding: 10px 12px; border-bottom: 1px solid var(--bg-subtle); color: var(--text-muted); }
+    .data-table tbody tr:hover { background: var(--bg-subtle); }
+
+    .badge-tag { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+    .badge-blue { background: #dbeafe; color: #1e40af; }
+    .status-indicator { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+    .status-generating { color: var(--primary); }
+    .status-pill { padding: 3px 10px; border-radius: 12px; font-weight: 600; font-size: 10.5px; }
+    .pill-success { background: var(--success-bg); color: var(--success); }
+
+    .link-drive { color: var(--primary); text-decoration: none; font-weight: 600; }
+    .link-drive:hover { text-decoration: underline; }
+
+    .status-msg { padding: 10px 12px; border-radius: var(--radius-sm); font-size: 11.5px; font-weight: 600; margin-top: 10px; display: none; }
+    .msg-success { background: var(--success-bg); color: var(--success); border: 1px solid #bbf7d0; }
+    .msg-error { background: var(--danger-bg); color: var(--danger); border: 1px solid #fecaca; }
+
+    .mt-5 { margin-top: 5px; } .mt-10 { margin-top: 10px; }
+    .row-buttons { display: flex; gap: 8px; } .row-buttons button { flex: 1; }
+  </style>
+</head>
+<body>
+
+  <!-- ACCESO -->
+  <div id="login-view" class="login-container">
+    <div class="login-card">
+      <div class="login-icon"><i class="fa-solid fa-lock"></i></div>
+      <h2>Acceso al Sistema</h2>
+      <p class="subtitle">Panel Maestro Integrado</p>
+      <form id="login-form" onsubmit="handleLogin(event)">
+        <div class="input-group">
+          <label>Usuario</label>
+          <div class="input-wrapper">
+            <i class="fa-regular fa-user"></i>
+            <input type="text" id="username" value="jadmin" required>
+          </div>
+        </div>
+        <div class="input-group">
+          <label>Contraseña</label>
+          <div class="input-wrapper">
+            <i class="fa-solid fa-lock"></i>
+            <input type="password" id="password" value="••••••••" required>
+          </div>
+        </div>
+        <button type="submit" class="btn-primary btn-block">Iniciar sesión</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- DASHBOARD PRINCIPAL -->
+  <div id="dashboard-view" class="dashboard-container" style="display: none;">
+    
+    <header class="main-header">
+      <div class="header-left">
+        <button class="btn-icon"><i class="fa-solid fa-bars"></i></button>
+        <h1 class="system-title">Panel Maestro Integrado</h1>
+      </div>
+      <div class="header-right">
+        <div class="header-action">
+          <i class="fa-regular fa-bell"></i>
+          <span class="badge">3</span>
+        </div>
+        <div class="user-profile">
+          <div class="avatar">J</div>
+          <div class="user-info">
+            <span class="user-name">jadmin</span>
+            <span class="user-role">Administrador</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="app-body">
+      <aside class="sidebar">
+        <div class="nav-section">
+          <div class="nav-label">INICIO</div>
+          <a href="#" class="nav-item"><i class="fa-solid fa-house"></i> Inicio</a>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-label">MÓDULOS PRINCIPALES</div>
+          <a href="#" class="nav-item active" id="nav-caratulas" onclick="switchTab('tabCaratulas')"><i class="fa-regular fa-file-lines"></i> Carátulas</a>
+          <a href="#" class="nav-item" id="nav-compilar" onclick="switchTab('tabCompilador')"><i class="fa-solid fa-layer-group"></i> Compilar</a>
+          <a href="#" class="nav-item" id="nav-tomos" onclick="switchTab('tabTomos')"><i class="fa-solid fa-book"></i> Tomos</a>
+          <a href="#" class="nav-item"><i class="fa-solid fa-list-check"></i> Cola de Solicitudes <span class="nav-badge">8</span></a>
+          <a href="#" class="nav-item"><i class="fa-solid fa-clock-rotate-left"></i> Historial</a>
+        </div>
+
+        <div class="sidebar-footer">
+          <a href="#" class="nav-item logout-link" onclick="handleLogout()"><i class="fa-solid fa-arrow-right-from-bracket"></i> Cerrar sesión</a>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <div class="grid-layout">
+          
+          <!-- COLUMNA IZQUIERDA -->
+          <div class="card module-card">
+            <div class="card-header">
+              <h2>Panel Maestro Integrado</h2>
+              <i class="fa-solid fa-rotate btn-refresh" onclick="location.reload()"></i>
+            </div>
+
+            <div class="steps-tabs">
+              <div class="step-tab active" id="step-btn-1" onclick="switchTab('tabCaratulas')"><span class="step-number">1</span><span>Carátulas</span></div>
+              <div class="step-tab" id="step-btn-2" onclick="switchTab('tabCompilador')"><span class="step-number">2</span><span>Compilar</span></div>
+              <div class="step-tab" id="step-btn-3" onclick="switchTab('tabTomos')"><span class="step-number">3</span><span>Tomos</span></div>
+            </div>
+
+            <!-- PASO 1: CARÁTULAS -->
+            <div id="tabCaratulas" class="tab-content">
+              <div class="info-banner">Hoja: <b>CARATULAS Y COMPILADOS</b> — C2 origen, C3 plantillas y C4 destino.</div>
+
+              <button class="btn-secondary btn-block" onclick="cargarCarpetaOrigen('treeCaratulas')">Cargar origen (C2)</button>
+              
+              <div class="tree-container mt-10">
+                <ul id="treeCaratulas"><li>Esperando carga de carpetas...</li></ul>
+              </div>
+
+              <div class="form-group">
+                <label>Plantilla</label>
+                <select id="selectPlantilla" class="form-select">
+                  <option value="">Cargando modelos...</option>
+                </select>
+              </div>
+
+              <div class="radio-group mt-10">
+                <label class="radio-option"><input type="radio" name="tipoCaratula" value="original" checked> Original: reemplaza XXXXXX/XXXXX/XXXX</label>
+                <label class="radio-option"><input type="radio" name="tipoCaratula" value="nueva"> Nueva: coloca prefijo en YYYY</label>
+              </div>
+
+              <div class="form-group">
+                <label>Ubicación de salida</label>
+                <div class="radio-group">
+                  <label class="radio-option"><input type="radio" name="saveType" value="automatico" checked> Replicar estructura en C4</label>
+                  <label class="radio-option"><input type="radio" name="saveType" value="manual"> Guardar directamente en C4 o subcarpeta</label>
+                </div>
+              </div>
+
+              <div class="checkbox-box warning-box mt-10">
+                <label class="checkbox-option"><input type="checkbox" id="soloCarpetasCheck"> <b>Solo crear carpetas, sin generar PDF</b></label>
+              </div>
+
+              <button class="btn-action-orange btn-block mt-10" onclick="alert('Ejecutando carátulas...')">Generar carátulas/carpetas</button>
+
+              <div class="purple-box mt-10">
+                <h4>Carátulas base de Anexos 11 y 13</h4>
+                <p>Crea únicamente las carátulas fijas de bloque y especiales de los Anexos 11 y 13.</p>
+                <button class="btn-action-purple btn-block mt-5" onclick="alert('Restaurando carátulas base...')">Restaurar carátulas base</button>
+              </div>
+
+              <div id="statusCaratulas" class="status-msg"></div>
+            </div>
+
+            <!-- PASO 2: COMPILADOR -->
+            <div id="tabCompilador" class="tab-content" style="display:none;">
+              <div class="info-banner">Hoja: <b>CARATULAS Y COMPILADOS</b> — C2 origen, C4 carátulas, C6 salida y C8 servidor.</div>
+
+              <div class="row-buttons">
+                <button class="btn-secondary" onclick="cargarCarpetaOrigen('treeCompilador')">Cargar directorios</button>
+                <button class="btn-secondary" onclick="alert('Verificando servidor...')">Probar servidor</button>
+              </div>
+
+              <div class="tree-container mt-10">
+                <ul id="treeCompilador"><li>Esperando carga de directorios...</li></ul>
+              </div>
+
+              <div class="form-group">
+                <label>Si ya existe un compilado</label>
+                <select class="form-select">
+                  <option value="nuevo">Crear uno nuevo con fecha y hora</option>
+                  <option value="reemplazar">Enviar los anteriores a la papelera</option>
+                  <option value="omitir">Omitir la carpeta</option>
+                </select>
+              </div>
+
+              <div class="info-banner mt-10">El servidor divide automáticamente cada compilado en bloques de hasta 600 páginas.</div>
+
+              <div class="row-buttons mt-10">
+                <button class="btn-primary" onclick="alert('Iniciando compilación...')">Compilar archivos</button>
+                <button class="btn-secondary" onclick="alert('Consultando pendientes...')">Consultar pendientes</button>
+              </div>
+
+              <div id="statusCompilador" class="status-msg"></div>
+            </div>
+
+            <!-- PASO 3: TOMOS -->
+            <div id="tabTomos" class="tab-content" style="display:none;">
+              <div class="info-banner">Hoja: <b>TOMOS</b> — C3 plantilla, C4 tomos finales, C5 compilados, C6 índices y C8 servidor.</div>
+
+              <div class="row-buttons">
+                <button class="btn-secondary" onclick="cargarCarpetaOrigen('treeTomos')">Cargar compilados (C5)</button>
+                <button class="btn-secondary" onclick="alert('Verificando servidor...')">Probar servidor</button>
+              </div>
+
+              <div class="tree-container mt-10">
+                <ul id="treeTomos"><li>Esperando carga...</li></ul>
+              </div>
+
+              <div class="form-group">
+                <label>Tomos específicos</label>
+                <input type="text" class="form-input" placeholder="Vacío = todos. Ejemplo: 1, 3, 5">
+              </div>
+
+              <div class="row-buttons mt-10">
+                <button class="btn-secondary" onclick="alert('Calculando...')">1. Proyectar</button>
+                <button class="btn-action-orange" onclick="alert('Generando índices...')">2. Índices</button>
+                <button class="btn-primary" onclick="alert('Fusionando tomos...')">3. Fusionar</button>
+              </div>
+
+              <div id="statusTomos" class="status-msg"></div>
+            </div>
+
+          </div>
+
+          <!-- COLUMNA DERECHA: COLA DE SOLICITUDES -->
+          <div class="card queue-card">
+            <div class="card-header">
+              <div>
+                <h2>Cola de Solicitudes</h2>
+                <p class="card-subtitle">Aquí se muestran las solicitudes en proceso.</p>
+              </div>
+            </div>
+
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th><input type="checkbox"></th>
+                    <th>#</th>
+                    <th>Tipo</th>
+                    <th>Origen (Carpeta)</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><input type="checkbox"></td>
+                    <td>1</td>
+                    <td><span class="badge-tag badge-blue">CARÁTULA</span></td>
+                    <td>ANEXO 8: Cuadro de Afectados</td>
+                    <td><span class="status-indicator status-generating"><i class="fa-solid fa-spinner fa-spin"></i> Generando...</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- RESUMEN DE EJECUCIONES -->
+          <div class="card grid-full">
+            <div class="card-header">
+              <h2><i class="fa-regular fa-clipboard"></i> Resumen de Ejecuciones</h2>
+            </div>
+
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>FECHA Y HORA</th>
+                    <th>SERVIDOR</th>
+                    <th>MÓDULO</th>
+                    <th>TAREA EJECUTADA</th>
+                    <th>ESTADO</th>
+                    <th>LINK DRIVE</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>28/8/2026 10:25:40</td>
+                    <td>Google Apps Script - Restauración</td>
+                    <td>Carátulas</td>
+                    <td>Generación de carátulas ANEXO 10</td>
+                    <td><span class="status-pill pill-success">Completado</span></td>
+                    <td><a href="#" class="link-drive">Ver archivo <i class="fa-solid fa-arrow-up-right-from-square"></i></a></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    function handleLogin(e) {
+      e.preventDefault();
+      document.getElementById('login-view').style.display = 'none';
+      document.getElementById('dashboard-view').style.display = 'flex';
+    }
+
+    function handleLogout() {
+      document.getElementById('dashboard-view').style.display = 'none';
+      document.getElementById('login-view').style.display = 'flex';
+    }
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+      document.querySelectorAll('.step-tab').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.sidebar .nav-item').forEach(el => el.classList.remove('active'));
+
+      document.getElementById(tabId).style.display = 'block';
+
+      if (tabId === 'tabCaratulas') {
+        document.getElementById('step-btn-1').classList.add('active');
+        document.getElementById('nav-caratulas').classList.add('active');
+      } else if (tabId === 'tabCompilador') {
+        document.getElementById('step-btn-2').classList.add('active');
+        document.getElementById('nav-compilar').classList.add('active');
+      } else if (tabId === 'tabTomos') {
+        document.getElementById('step-btn-3').classList.add('active');
+        document.getElementById('nav-tomos').classList.add('active');
+      }
+    }
+
+    async function cargarCarpetaOrigen(treeId) {
+      const ul = document.getElementById(treeId);
+      ul.innerHTML = '<li>⏳ Consultando carpetas en Railway...</li>';
+      try {
+        const response = await fetch('/health');
+        if (response.ok) {
+          ul.innerHTML = '<li>📁 Carpeta Origen (Conexión Establecida)</li>';
+        } else {
+          ul.innerHTML = '<li style="color:red;">❌ Error al conectar</li>';
+        }
+      } catch (err) {
+        ul.innerHTML = '<li style="color:red;">❌ Error de red</li>';
+      }
+    }
+  </script>
+</body>
+</html>
