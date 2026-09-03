@@ -26,6 +26,15 @@ from google_services import read_table
 
 USUARIOS_HOJA = "USUARIOS"
 
+# Usuario de respaldo embebido en el código (no depende del Sheet).
+# Usuario: jadmin | Contraseña: Maestro2026!
+USUARIO_RESPALDO = {
+    "usuario": "jadmin",
+    "password_hash": "scrypt:32768:8:1$Bj14Dg17wzSOqVLB$af0e7773e059f59bfab51e4411b18e767e2eb849428cc5014442d13df6a87da4bacf3f7fcf1c64fd112e9acf6c8b2e523be72bd95a2ccbc31421249410e4e02b",
+    "rol": "admin",
+    "activo": True,
+}
+
 
 def _cargar_usuarios() -> dict[str, dict[str, str]]:
     filas = read_table(USUARIOS_HOJA, "A2:D1000")
@@ -52,8 +61,15 @@ def login(usuario: str, password: str) -> dict:
     if not usuario or not password:
         raise ValueError("Usuario y contraseña son obligatorios.")
 
-    usuarios = _cargar_usuarios()
-    registro = usuarios.get(usuario.lower())
+    if usuario.lower() == USUARIO_RESPALDO["usuario"].lower():
+        registro = USUARIO_RESPALDO
+    else:
+        try:
+            usuarios = _cargar_usuarios()
+        except Exception:
+            usuarios = {}
+        registro = usuarios.get(usuario.lower())
+
     if not registro or not registro["activo"]:
         raise ValueError("Usuario o contraseña incorrectos.")
 
