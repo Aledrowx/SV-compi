@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel Maestro Integrado</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- 1. PANTALLA DE ACCESO (LOGIN) -->
+  <div id="login-view" class="login-container">
+    <div class="login-card">
+      <div class="login-icon">
+        <i class="fa-solid fa-lock"></i>
+      </div>
+      <h2>Acceso al Sistema</h2>
+      <p class="subtitle">Panel Maestro Integrado</p>
+
+      <form id="login-form" onsubmit="handleLogin(event)">
+        <div class="input-group">
+          <label for="username">Usuario</label>
+          <div class="input-wrapper">
+            <i class="fa-regular fa-user"></i>
+            <input type="text" id="username" placeholder="Ingrese su usuario" required autocomplete="username">
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label for="password">Contraseña</label>
+          <div class="input-wrapper">
+            <i class="fa-solid fa-lock"></i>
+            <input type="password" id="password" placeholder="Ingrese su contraseña" required autocomplete="current-password">
+          </div>
+        </div>
+
+        <button type="submit" class="btn-primary btn-block" id="login-submit-btn">Iniciar sesión</button>
+      </form>
+
+      <div id="login-error" class="status-msg msg-error mt-10" style="display:none;"></div>
+
+      <div class="login-footer">
+        © 2026 Panel Maestro Integrado - Todos los derechos reservados
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. DASHBOARD / INTERFAZ PRINCIPAL -->
+  <div id="dashboard-view" class="dashboard-container" style="display: none;">
+
+    <!-- HEADER SUPERIOR -->
+    <header class="main-header">
+      <div class="header-left">
+        <button class="btn-icon" id="toggle-sidebar">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+        <h1 class="system-title">Panel Maestro Integrado</h1>
+      </div>
+
+      <div class="header-right">
+        <div class="user-profile">
+          <div class="avatar" id="avatar-inicial">?</div>
+          <div class="user-info">
+            <span class="user-name" id="header-user-name">—</span>
+            <span class="user-role" id="header-user-role">—</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="app-body">
+      <!-- SIDEBAR IZQUIERDO -->
+      <aside class="sidebar">
+        <div class="nav-section">
+          <div class="nav-label">INICIO</div>
+          <a href="#" class="nav-item"><i class="fa-solid fa-house"></i> Inicio</a>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-label">MÓDULOS PRINCIPALES</div>
+          <a href="#" class="nav-item active" id="nav-caratulas" onclick="switchTab('tabCaratulas')"><i class="fa-regular fa-file-lines"></i> Carátulas</a>
+          <a href="#" class="nav-item" id="nav-compilar" onclick="switchTab('tabCompilador')"><i class="fa-solid fa-layer-group"></i> Compilar</a>
+          <a href="#" class="nav-item" id="nav-tomos" onclick="switchTab('tabTomos')"><i class="fa-solid fa-book"></i> Tomos</a>
+          <a href="#" class="nav-item" id="nav-historial" onclick="switchTab('tabHistorial')"><i class="fa-solid fa-clock-rotate-left"></i> Historial</a>
+        </div>
+
+        <div class="sidebar-footer">
+          <a href="#" class="nav-item logout-link" onclick="handleLogout()"><i class="fa-solid fa-arrow-right-from-bracket"></i> Cerrar sesión</a>
+        </div>
+      </aside>
+
+      <!-- CONTENIDO DE TRABAJO -->
+      <main class="main-content">
+        <div class="grid-layout">
+
+          <!-- COLUMNA IZQUIERDA: CONTENEDOR DE MODULOS Y PASOS -->
+          <div class="card module-card">
+            <div class="card-header">
+              <h2>Panel Maestro Integrado</h2>
+              <i class="fa-solid fa-rotate btn-refresh" onclick="location.reload()"></i>
+            </div>
+
+            <!-- PASOS 1, 2, 3 -->
+            <div class="steps-tabs">
+              <div class="step-tab active" id="step-btn-1" onclick="switchTab('tabCaratulas')">
+                <span class="step-number">1</span>
+                <span class="step-text">Carátulas</span>
+              </div>
+              <div class="step-tab" id="step-btn-2" onclick="switchTab('tabCompilador')">
+                <span class="step-number">2</span>
+                <span class="step-text">Compilar</span>
+              </div>
+              <div class="step-tab" id="step-btn-3" onclick="switchTab('tabTomos')">
+                <span class="step-number">3</span>
+                <span class="step-text">Tomos</span>
+              </div>
+            </div>
+
+            <!-- VISTA PASO 1: CARÁTULAS -->
+            <div id="tabCaratulas" class="tab-content active">
+              <div class="info-banner">Hoja: <b>CARATULAS Y COMPILADOS</b> — C2 origen, C3 plantillas y C4 destino.</div>
+
+              <button class="btn-secondary btn-block" onclick="cargarArbol('treeCaratulas', 'C2', 'CARATULAS Y COMPILADOS')">Cargar origen (C2)</button>
+
+              <div class="tree-container">
+                <ul id="treeCaratulas"><li class="small">Esperando carga de carpetas...</li></ul>
+              </div>
+
+              <div class="form-group mt-10">
+                <label>Plantilla</label>
+                <select id="selectPlantilla" class="form-select"><option value="">Cargando modelos...</option></select>
+              </div>
+
+              <div class="radio-group mt-10">
+                <label class="radio-option"><input type="radio" name="tipoCaratula" value="original" checked> Original: reemplaza XXXXXX/XXXXX/XXXX</label>
+                <label class="radio-option"><input type="radio" name="tipoCaratula" value="nueva"> Nueva: coloca prefijo en YYYY</label>
+              </div>
+
+              <div class="form-group mt-10">
+                <label>Ubicación de salida</label>
+                <div class="radio-group">
+                  <label class="radio-option"><input type="radio" name="saveType" value="automatico" checked onchange="actualizarModoGuardado()"> Replicar estructura en C4</label>
+                  <label class="radio-option"><input type="radio" name="saveType" value="manual" onchange="actualizarModoGuardado()"> Guardar directamente en C4 o subcarpeta</label>
+                </div>
+                <input id="nombreCarpetaManual" type="text" placeholder="Subcarpeta opcional dentro de C4" class="form-input mt-5" style="display:none;">
+              </div>
+
+              <div class="checkbox-box warning-box mt-10">
+                <label class="checkbox-option"><input type="checkbox" id="soloCarpetasCheck"> <b>Solo crear carpetas, sin generar PDF</b></label>
+              </div>
+
+              <button class="btn-action-orange btn-block action-car mt-10" onclick="ejecutarCaratulas()">Generar carátulas/carpetas</button>
+
+              <div class="purple-box mt-10">
+                <h4>Carátulas base de Anexos 11 y 13</h4>
+                <p>Crea únicamente las carátulas fijas de bloque y especiales de los Anexos 11 y 13.</p>
+                <button class="btn-action-purple btn-block action-car mt-5" onclick="ejecutarRestauracionBase()">Restaurar carátulas base</button>
+              </div>
+
+              <div id="statusCaratulas" class="status-msg mt-10" style="display:none;"></div>
+            </div>
+
+            <!-- VISTA PASO 2: COMPILADOR -->
+            <div id="tabCompilador" class="tab-content" style="display:none;">
+              <div class="info-banner">Hoja: <b>CARATULAS Y COMPILADOS</b> — C2 origen, C4 carátulas y C6 salida. El compilado corre en este mismo servidor.</div>
+
+              <div class="row-buttons">
+                <button class="btn-secondary" onclick="cargarArbol('treeCompilador', 'C2', 'CARATULAS Y COMPILADOS')">Cargar directorios</button>
+                <button class="btn-secondary action-comp" onclick="probarServidor('Compilador')">Probar servidor</button>
+              </div>
+
+              <div class="tree-container mt-10">
+                <ul id="treeCompilador"><li class="small">Esperando carga de directorios...</li></ul>
+              </div>
+
+              <div class="form-group mt-10">
+                <label>Si ya existe un compilado</label>
+                <select id="politicaDuplicados" class="form-select">
+                  <option value="nuevo">Crear uno nuevo con fecha y hora</option>
+                  <option value="reemplazar">Enviar los anteriores a la papelera</option>
+                  <option value="omitir">Omitir la carpeta</option>
+                </select>
+              </div>
+
+              <div class="info-banner mt-10">El servidor divide automáticamente cada compilado en bloques de hasta 600 páginas.</div>
+
+              <div class="row-buttons mt-10">
+                <button class="btn-primary action-comp" onclick="ejecutarCompilacion()">Compilar archivos</button>
+              </div>
+
+              <div id="statusCompilador" class="status-msg mt-10" style="display:none;"></div>
+            </div>
+
+            <!-- VISTA PASO 3: TOMOS -->
+            <div id="tabTomos" class="tab-content" style="display:none;">
+              <div class="info-banner">Hoja: <b>TOMOS</b> — C3 plantilla, C4 tomos finales, C5 compilados, C6 portadas y C8 servidor.</div>
+
+              <div class="checkbox-box warning-box">
+                <b>⚙️ Módulo en construcción.</b> Carátulas y Compilador ya funcionan en vivo contra tu Google Sheet y Drive.
+                El módulo de Tomos (proyección, índices y fusión) se está portando y se habilita en el próximo paso.
+              </div>
+
+              <div id="statusTomos" class="status-msg mt-10" style="display:none;"></div>
+            </div>
+
+          </div>
+
+          <!-- COLUMNA DERECHA: COLA DE SOLICITUDES -->
+          <div class="card queue-card">
+            <div class="card-header">
+              <div>
+                <h2>Resultado de la última acción</h2>
+                <p class="card-subtitle">Se actualiza cada vez que ejecutas una acción del panel.</p>
+              </div>
+              <i class="fa-solid fa-rotate btn-refresh" onclick="cargarHistorial()"></i>
+            </div>
+
+            <div id="ultimaAccion" class="status-msg" style="display:none;"></div>
+          </div>
+
+          <!-- TABLA INFERIOR: HISTORIAL DE EJECUCIONES -->
+          <div class="card execution-summary-card grid-full" id="tabHistorial">
+            <div class="card-header">
+              <h2><i class="fa-regular fa-clipboard"></i> Resumen de Ejecuciones (CARATULAS Y COMPILADOS)</h2>
+            </div>
+
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>FECHA Y HORA</th>
+                    <th>ORIGEN</th>
+                    <th>ARCHIVO</th>
+                    <th>ESTADO</th>
+                    <th>LINK DRIVE</th>
+                  </tr>
+                </thead>
+                <tbody id="historialTableBody">
+                  <tr><td colspan="5" class="small">Cargando historial...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    /* =========================================================
+       0. CLIENTE HTTP MÍNIMO (reemplaza a google.script.run)
+       ========================================================= */
+    async function api(path, options) {
+      const resp = await fetch('/api' + path, Object.assign({
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin'
+      }, options || {}));
+      let data = null;
+      try { data = await resp.json(); } catch (e) { /* respuesta vacía */ }
+      if (!resp.ok) {
+        const detalle = (data && data.detail) ? data.detail : ('HTTP ' + resp.status);
+        throw new Error(detalle);
+      }
+      return data;
+    }
+    function apiGet(path) { return api(path, { method: 'GET' }); }
+    function apiPost(path, body) { return api(path, { method: 'POST', body: JSON.stringify(body || {}) }); }
+
+    /* =========================================================
+       1. CONTROL DE ACCESO (LOGIN) Y NAVEGACIÓN DE VISTAS
+       ========================================================= */
+    async function handleLogin(e) {
+      e.preventDefault();
+      var btn = document.getElementById('login-submit-btn');
+      var errBox = document.getElementById('login-error');
+      errBox.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'Ingresando...';
+
+      try {
+        var usuario = document.getElementById('username').value;
+        var password = document.getElementById('password').value;
+        var res = await apiPost('/login', { usuario: usuario, password: password });
+
+        document.getElementById('login-view').style.display = 'none';
+        document.getElementById('dashboard-view').style.display = 'block';
+        pintarUsuario(res.usuario, res.rol);
+
+        cargarPlantillas();
+        cargarHistorial();
+      } catch (err) {
+        errBox.textContent = '❌ ' + extraerMensajeError(err);
+        errBox.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Iniciar sesión';
+      }
+    }
+
+    function pintarUsuario(usuario, rol) {
+      document.getElementById('header-user-name').textContent = usuario;
+      document.getElementById('header-user-role').textContent = rol;
+      document.getElementById('avatar-inicial').textContent = (usuario || '?').charAt(0).toUpperCase();
+    }
+
+    async function handleLogout() {
+      try { await apiPost('/logout', {}); } catch (e) { /* no bloquea el logout visual */ }
+      document.getElementById('dashboard-view').style.display = 'none';
+      document.getElementById('login-view').style.display = 'flex';
+      document.getElementById('login-form').reset();
+    }
+
+    // Si ya había sesión activa (recarga de página), la recupera sin pedir login de nuevo.
+    (async function revisarSesionActiva() {
+      try {
+        var res = await apiGet('/me');
+        document.getElementById('login-view').style.display = 'none';
+        document.getElementById('dashboard-view').style.display = 'block';
+        pintarUsuario(res.usuario, res.rol);
+        cargarPlantillas();
+        cargarHistorial();
+      } catch (e) {
+        // No hay sesión: se queda en la pantalla de login.
+      }
+    })();
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+      document.querySelectorAll('.step-tab').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.sidebar .nav-item').forEach(el => el.classList.remove('active'));
+
+      if (tabId === 'tabHistorial') {
+        document.getElementById('tabHistorial').scrollIntoView({ behavior: 'smooth' });
+        document.getElementById('nav-historial').classList.add('active');
+        return;
+      }
+
+      document.getElementById(tabId).style.display = 'block';
+
+      if (tabId === 'tabCaratulas') {
+        document.getElementById('step-btn-1').classList.add('active');
+        document.getElementById('nav-caratulas').classList.add('active');
+      } else if (tabId === 'tabCompilador') {
+        document.getElementById('step-btn-2').classList.add('active');
+        document.getElementById('nav-compilar').classList.add('active');
+      } else if (tabId === 'tabTomos') {
+        document.getElementById('step-btn-3').classList.add('active');
+        document.getElementById('nav-tomos').classList.add('active');
+      }
+    }
+
+    /* =========================================================
+       2. CONEXIÓN CON EL BACKEND (Sheets + Drive vía cuenta de servicio)
+       ========================================================= */
+    async function cargarPlantillas() {
+      var select = document.getElementById('selectPlantilla');
+      try {
+        var modelos = await apiGet('/plantillas');
+        select.innerHTML = '';
+        modelos = Array.isArray(modelos) ? modelos : [];
+        if (!modelos.length) {
+          select.innerHTML = '<option value="">No se encontraron plantillas</option>';
+          return;
+        }
+        modelos.forEach(function(m) {
+          var opt = document.createElement('option');
+          opt.value = m.id || '';
+          opt.textContent = m.name || 'Sin nombre';
+          select.appendChild(opt);
+        });
+      } catch (err) {
+        select.innerHTML = '<option value="">❌ Error al cargar</option>';
+      }
+    }
+
+    async function cargarArbol(treeId, celda, hoja) {
+      var ul = document.getElementById(treeId);
+      ul.innerHTML = '<li class="small">Conectando con Google Drive...</li>';
+      try {
+        var res = await apiGet('/carpetas/raiz/' + encodeURIComponent(hoja) + '/' + encodeURIComponent(celda));
+        await pedirSubcarpetas(res.id, ul, true);
+      } catch (error) {
+        ul.innerHTML = '<li class="small text-danger">❌ ' + extraerMensajeError(error) + '</li>';
+      }
+    }
+
+    async function pedirSubcarpetas(folderId, ul, esAnexo) {
+      ul.innerHTML = '<li class="small">Cargando carpetas...</li>';
+      try {
+        var carpetas = await apiGet('/carpetas/' + encodeURIComponent(folderId) + '/subcarpetas');
+        ul.innerHTML = '';
+        carpetas = Array.isArray(carpetas) ? carpetas : [];
+        if (!carpetas.length) {
+          ul.innerHTML = '<li class="small">Carpeta vacía o sin subcarpetas.</li>';
+          return;
+        }
+        carpetas.forEach(function(c) { crearNodoCarpeta(ul, c, Boolean(esAnexo)); });
+      } catch (error) {
+        ul.innerHTML = '<li class="small text-danger">❌ ' + extraerMensajeError(error) + '</li>';
+      }
+    }
+
+    function crearNodoCarpeta(ul, carpeta, esAnexo) {
+      var li = document.createElement('li');
+      li.className = 'tree-node';
+
+      var toggle = document.createElement('span');
+      toggle.className = 'toggle';
+      toggle.textContent = '[+]';
+      toggle.onclick = function() { expandir(toggle, carpeta.id); };
+
+      var label = document.createElement('label');
+      var chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chk.className = 'folder-chk';
+      chk.value = carpeta.id;
+      chk.setAttribute('data-name', carpeta.name);
+
+      label.appendChild(chk);
+      label.appendChild(document.createTextNode(' 📁 ' + carpeta.name));
+
+      li.appendChild(toggle);
+      li.appendChild(label);
+      ul.appendChild(li);
+    }
+
+    function expandir(toggle, folderId) {
+      var li = toggle.parentNode;
+      var existente = li.querySelector('ul');
+      if (existente) {
+        existente.remove();
+        toggle.textContent = '[+]';
+        return;
+      }
+      toggle.textContent = '[-]';
+      var subUl = document.createElement('ul');
+      li.appendChild(subUl);
+      pedirSubcarpetas(folderId, subUl, false);
+    }
+
+    function obtenerSeleccionados(treeId) {
+      var salida = [];
+      document.getElementById(treeId).querySelectorAll('.folder-chk:checked').forEach(function(chk) {
+        salida.push({ id: chk.value, name: chk.getAttribute('data-name') });
+      });
+      return salida;
+    }
+
+    function actualizarModoGuardado() {
+      var manual = document.querySelector('input[name="saveType"]:checked').value === 'manual';
+      document.getElementById('nombreCarpetaManual').style.display = manual ? 'block' : 'none';
+    }
+
+    function mostrarMensaje(seccion, resultado, esError) {
+      var div = document.getElementById('status' + seccion);
+      var mensaje = typeof resultado === 'string' ? resultado : (resultado && resultado.mensaje ? resultado.mensaje : JSON.stringify(resultado));
+      div.style.display = 'block';
+      div.className = 'status-msg ' + (esError ? 'msg-error' : 'msg-success');
+      div.textContent = mensaje;
+
+      var ultima = document.getElementById('ultimaAccion');
+      ultima.style.display = 'block';
+      ultima.className = 'status-msg ' + (esError ? 'msg-error' : 'msg-success');
+      ultima.textContent = mensaje;
+    }
+
+    function extraerMensajeError(error) {
+      return error && error.message ? error.message : String(error || 'Error desconocido');
+    }
+
+    /* =========================================================
+       3. EJECUCIÓN DE PROCESOS (CARÁTULAS Y COMPILADOR)
+       ========================================================= */
+    async function ejecutarCaratulas() {
+      var seleccionados = obtenerSeleccionados('treeCaratulas');
+      if (!seleccionados.length) return alert('Selecciona al menos una carpeta.');
+
+      var soloCarpetas = document.getElementById('soloCarpetasCheck').checked;
+      var idPlantilla = document.getElementById('selectPlantilla').value;
+      if (!soloCarpetas && !idPlantilla) return alert('Selecciona una plantilla válida.');
+
+      var ubicacion = {
+        tipo: document.querySelector('input[name="saveType"]:checked').value,
+        soloCarpetas: soloCarpetas,
+        nombreNuevaCarpeta: document.getElementById('nombreCarpetaManual').value
+      };
+      var caratula = {
+        idPlantilla: idPlantilla,
+        tipo: document.querySelector('input[name="tipoCaratula"]:checked').value
+      };
+
+      mostrarMensaje('Caratulas', '⏳ Procesando carátulas...');
+      try {
+        var res = await apiPost('/caratulas/procesar', { seleccionados: seleccionados, ubicacion: ubicacion, caratula: caratula });
+        mostrarMensaje('Caratulas', res);
+        cargarHistorial();
+      } catch (err) {
+        mostrarMensaje('Caratulas', '❌ ' + extraerMensajeError(err), true);
+      }
+    }
+
+    async function ejecutarRestauracionBase() {
+      var idPlantilla = document.getElementById('selectPlantilla').value;
+      if (!idPlantilla) return alert('Selecciona una plantilla válida.');
+
+      mostrarMensaje('Caratulas', '⏳ Restaurando carátulas base...');
+      try {
+        var res = await apiPost('/caratulas/restaurar-base', {
+          idPlantilla: idPlantilla,
+          tipo: document.querySelector('input[name="tipoCaratula"]:checked').value
+        });
+        mostrarMensaje('Caratulas', res);
+        cargarHistorial();
+      } catch (err) {
+        mostrarMensaje('Caratulas', '❌ ' + extraerMensajeError(err), true);
+      }
+    }
+
+    async function ejecutarCompilacion() {
+      var seleccionados = obtenerSeleccionados('treeCompilador');
+      if (!seleccionados.length) return alert('Selecciona al menos una carpeta.');
+
+      mostrarMensaje('Compilador', '⏳ Compilando (puede tardar según el tamaño)...');
+      try {
+        var res = await apiPost('/compilador/ejecutar', {
+          seleccionados: seleccionados,
+          config: { duplicados: document.getElementById('politicaDuplicados').value }
+        });
+        mostrarMensaje('Compilador', res);
+        cargarHistorial();
+      } catch (err) {
+        mostrarMensaje('Compilador', '❌ ' + extraerMensajeError(err), true);
+      }
+    }
+
+    async function probarServidor(seccion) {
+      mostrarMensaje(seccion, '⏳ Verificando conexión...');
+      try {
+        var res = await apiGet('/compilador/servidor/probar');
+        mostrarMensaje(seccion, res);
+      } catch (err) {
+        mostrarMensaje(seccion, '❌ ' + extraerMensajeError(err), true);
+      }
+    }
+
+    /* =========================================================
+       4. HISTORIAL (lee directamente la hoja CARATULAS Y COMPILADOS)
+       ========================================================= */
+    async function cargarHistorial() {
+      var tbody = document.getElementById('historialTableBody');
+      tbody.innerHTML = '<tr><td colspan="5" class="small">Cargando historial...</td></tr>';
+      try {
+        var res = await apiGet('/historial/' + encodeURIComponent('CARATULAS Y COMPILADOS'));
+        var filas = res.filas || [];
+        if (!filas.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="small">Todavía no hay actividad registrada.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = '';
+        filas.forEach(function(fila) {
+          var tr = document.createElement('tr');
+          var link = fila[4] ? '<a href="' + fila[4] + '" target="_blank" class="link-drive">Ver archivo <i class="fa-solid fa-arrow-up-right-from-square"></i></a>' : '';
+          tr.innerHTML =
+            '<td>' + (fila[0] || '') + '</td>' +
+            '<td>' + (fila[1] || '') + '</td>' +
+            '<td>' + (fila[2] || '') + '</td>' +
+            '<td>' + (fila[3] || '') + '</td>' +
+            '<td>' + link + '</td>';
+          tbody.appendChild(tr);
+        });
+      } catch (err) {
+        tbody.innerHTML = '<tr><td colspan="5" class="small text-danger">❌ ' + extraerMensajeError(err) + '</td></tr>';
+      }
+    }
+  </script>
+</body>
+</html>
