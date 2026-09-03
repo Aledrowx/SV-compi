@@ -4,21 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Panel Maestro Integrado</title>
-  
-  <!-- LIBRERÍAS EXTERNAS -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-
-  <!-- TODO EL CSS EMBEBIDO AQUÍ -->
+  
   <style>
     :root {
       --primary: #2563eb;
       --primary-hover: #1d4ed8;
       --primary-light: #eff6ff;
       --accent-orange: #d97706;
-      --accent-orange-hover: #b45309;
       --accent-purple: #9333ea;
-      --accent-purple-hover: #7e22ce;
       --success: #16a34a;
       --success-bg: #dcfce7;
       --warning: #b45309;
@@ -39,7 +34,6 @@
       --radius-md: 8px;
       --radius-lg: 12px;
       --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07);
       --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08);
     }
 
@@ -61,7 +55,7 @@
 
     /* DASHBOARD */
     .dashboard-container { display: flex; flex-direction: column; min-height: 100vh; }
-    .main-header { height: 56px; background: var(--bg-card); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 20px; sticky: top; z-index: 100; }
+    .main-header { height: 56px; background: var(--bg-card); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 20px; position: sticky; top: 0; z-index: 100; }
     .header-left { display: flex; align-items: center; gap: 16px; }
     .system-title { font-size: 16px; font-weight: 700; color: var(--text-main); }
     .header-right { display: flex; align-items: center; gap: 20px; }
@@ -70,6 +64,7 @@
 
     .app-body { display: flex; flex: 1; }
     .sidebar { width: 230px; background: var(--bg-card); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 16px 0; }
+    .nav-section { margin-bottom: 18px; }
     .nav-label { font-size: 10px; font-weight: 700; color: var(--text-light); padding: 0 20px 8px; }
     .nav-item { display: flex; align-items: center; padding: 9px 20px; color: var(--text-muted); text-decoration: none; font-size: 12.5px; font-weight: 500; gap: 12px; border-left: 3px solid transparent; }
     .nav-item.active { background: var(--primary-light); color: var(--primary); border-left-color: var(--primary); font-weight: 600; }
@@ -94,7 +89,7 @@
     .step-tab.active { background: #ffffff; color: var(--accent-orange); box-shadow: var(--shadow-sm); }
     .step-tab.active .step-number { background: var(--accent-orange); }
 
-    /* TABLAS */
+    /* TABLAS Y ÁRBOLES */
     .table-container { overflow-x: auto; }
     .data-table { width: 100%; border-collapse: collapse; font-size: 11.5px; text-align: left; }
     .data-table th { background: var(--bg-subtle); color: var(--text-muted); font-weight: 700; padding: 10px 12px; border-bottom: 1px solid var(--border); }
@@ -102,20 +97,202 @@
 
     .badge-tag { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
     .badge-blue { background: #dbeafe; color: #1e40af; }
-    .badge-cyan { background: #cff4fc; color: #055160; }
     .status-indicator { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
     .status-generating { color: var(--primary); }
-    .status-success { color: var(--success); }
     .status-pill { padding: 3px 10px; border-radius: 12px; font-weight: 600; font-size: 10.5px; }
     .pill-success { background: var(--success-bg); color: var(--success); }
 
     .tree-container { max-height: 180px; overflow-y: auto; background: var(--bg-subtle); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 8px 10px; }
     .tree-container ul { list-style: none; padding-left: 8px; }
-    .tree-node { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11.5px; }
-    .tree-node .toggle { color: var(--primary); font-weight: 700; cursor: pointer; }
     .info-banner { background: var(--info-bg); border: 1px solid var(--info-border); color: #0369a1; padding: 9px 12px; border-radius: var(--radius-sm); font-size: 11.5px; margin-bottom: 12px; }
     .purple-box { background: #faf5ff; border: 1px solid #e9d5ff; padding: 12px; border-radius: var(--radius-sm); }
-    .mt-5 { margin-top: 5px; } .mt-10 { margin-top: 10px; } .mt-15 { margin-top: 15px; }
+    .mt-5 { margin-top: 5px; } .mt-10 { margin-top: 10px; }
     .row-buttons { display: flex; gap: 8px; } .row-buttons button { flex: 1; }
+    .status-msg { padding: 8px 12px; border-radius: 6px; font-size: 11px; font-weight: 600; margin-top: 10px; display: none; }
+    .msg-success { background: var(--success-bg); color: var(--success); }
+    .msg-error { background: var(--danger-bg); color: var(--danger); }
   </style>
 </head>
+<body>
+
+  <!-- ACCESO -->
+  <div id="login-view" class="login-container">
+    <div class="login-card">
+      <div class="login-icon"><i class="fa-solid fa-lock"></i></div>
+      <h2>Acceso al Sistema</h2>
+      <p class="subtitle">Panel Maestro Integrado</p>
+      <form id="login-form" onsubmit="handleLogin(event)">
+        <div class="input-group">
+          <label>Usuario</label>
+          <div class="input-wrapper">
+            <i class="fa-regular fa-user"></i>
+            <input type="text" id="username" value="jadmin" required>
+          </div>
+        </div>
+        <div class="input-group">
+          <label>Contraseña</label>
+          <div class="input-wrapper">
+            <i class="fa-solid fa-lock"></i>
+            <input type="password" id="password" value="••••••••" required>
+          </div>
+        </div>
+        <button type="submit" class="btn-primary btn-block">Iniciar sesión</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- DASHBOARD PRINCIPAL -->
+  <div id="dashboard-view" class="dashboard-container" style="display: none;">
+    <header class="main-header">
+      <div class="header-left">
+        <h1 class="system-title">Panel Maestro Integrado</h1>
+      </div>
+      <div class="header-right">
+        <div class="user-profile">
+          <div class="avatar">J</div>
+          <span class="user-name">jadmin</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="app-body">
+      <aside class="sidebar">
+        <div class="nav-section">
+          <div class="nav-label">MÓDULOS PRINCIPALES</div>
+          <a href="#" class="nav-item active" id="nav-caratulas" onclick="switchTab('tabCaratulas')"><i class="fa-regular fa-file-lines"></i> Carátulas</a>
+          <a href="#" class="nav-item" id="nav-compilar" onclick="switchTab('tabCompilador')"><i class="fa-solid fa-layer-group"></i> Compilar</a>
+          <a href="#" class="nav-item" id="nav-tomos" onclick="switchTab('tabTomos')"><i class="fa-solid fa-book"></i> Tomos</a>
+        </div>
+        <div class="sidebar-footer">
+          <a href="#" class="nav-item" onclick="handleLogout()"><i class="fa-solid fa-arrow-right-from-bracket"></i> Cerrar sesión</a>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <div class="grid-layout">
+          
+          <div class="card module-card">
+            <div class="card-header">
+              <h2>Panel Maestro Integrado</h2>
+            </div>
+
+            <div class="steps-tabs">
+              <div class="step-tab active" id="step-btn-1" onclick="switchTab('tabCaratulas')"><span class="step-number">1</span><span>Carátulas</span></div>
+              <div class="step-tab" id="step-btn-2" onclick="switchTab('tabCompilador')"><span class="step-number">2</span><span>Compilar</span></div>
+              <div class="step-tab" id="step-btn-3" onclick="switchTab('tabTomos')"><span class="step-number">3</span><span>Tomos</span></div>
+            </div>
+
+            <!-- PASO 1 -->
+            <div id="tabCaratulas" class="tab-content">
+              <div class="info-banner">Modulo: <b>Carátulas</b></div>
+              <button class="btn-secondary btn-block" onclick="cargarCarpetaOrigen('treeCaratulas')">Cargar carpetas desde Railway</button>
+              <div class="tree-container mt-10"><ul id="treeCaratulas"><li>Presiona cargar para consultar carpetas...</li></ul></div>
+              <button class="btn-action-orange btn-block mt-10" onclick="alert('Generando carátulas...')">Generar carátulas</button>
+              <div id="statusCaratulas" class="status-msg"></div>
+            </div>
+
+            <!-- PASO 2 -->
+            <div id="tabCompilador" class="tab-content" style="display:none;">
+              <div class="info-banner">Modulo: <b>Compilador PDF</b></div>
+              <button class="btn-secondary btn-block" onclick="cargarCarpetaOrigen('treeCompilador')">Cargar carpetas origen</button>
+              <div class="tree-container mt-10"><ul id="treeCompilador"><li>Presiona cargar para consultar carpetas...</li></ul></div>
+              <button class="btn-primary btn-block mt-10" onclick="alert('Iniciando compilación...')">Compilar archivos</button>
+              <div id="statusCompilador" class="status-msg"></div>
+            </div>
+
+            <!-- PASO 3 -->
+            <div id="tabTomos" class="tab-content" style="display:none;">
+              <div class="info-banner">Modulo: <b>Ensamblador de Tomos</b></div>
+              <button class="btn-secondary btn-block" onclick="cargarCarpetaOrigen('treeTomos')">Cargar compilados</button>
+              <div class="tree-container mt-10"><ul id="treeTomos"><li>Presiona cargar para consultar carpetas...</li></ul></div>
+              <button class="btn-action-purple btn-block mt-10" onclick="alert('Generando tomos...')">Fusionar Tomos</button>
+              <div id="statusTomos" class="status-msg"></div>
+            </div>
+
+          </div>
+
+          <!-- COLA -->
+          <div class="card queue-card">
+            <div class="card-header">
+              <h2>Cola de Solicitudes</h2>
+            </div>
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr><th>#</th><th>Tipo</th><th>Origen</th><th>Estado</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>1</td><td><span class="badge-tag badge-blue">CARÁTULA</span></td><td>ANEXO 8</td><td><span class="status-indicator status-generating"><i class="fa-solid fa-spinner fa-spin"></i> Generando...</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- HISTORIAL -->
+          <div class="card grid-full">
+            <div class="card-header"><h2>Resumen de Ejecuciones</h2></div>
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr><th>FECHA</th><th>SERVIDOR</th><th>MÓDULO</th><th>ESTADO</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>28/8/2026</td><td>Railway Backend</td><td>Carátulas</td><td><span class="status-pill pill-success">Completado</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    function handleLogin(e) {
+      e.preventDefault();
+      document.getElementById('login-view').style.display = 'none';
+      document.getElementById('dashboard-view').style.display = 'flex';
+    }
+
+    function handleLogout() {
+      document.getElementById('dashboard-view').style.display = 'none';
+      document.getElementById('login-view').style.display = 'flex';
+    }
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+      document.querySelectorAll('.step-tab').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.sidebar .nav-item').forEach(el => el.classList.remove('active'));
+
+      document.getElementById(tabId).style.display = 'block';
+
+      if (tabId === 'tabCaratulas') {
+        document.getElementById('step-btn-1').classList.add('active');
+        document.getElementById('nav-caratulas').classList.add('active');
+      } else if (tabId === 'tabCompilador') {
+        document.getElementById('step-btn-2').classList.add('active');
+        document.getElementById('nav-compilar').classList.add('active');
+      } else if (tabId === 'tabTomos') {
+        document.getElementById('step-btn-3').classList.add('active');
+        document.getElementById('nav-tomos').classList.add('active');
+      }
+    }
+
+    async function cargarCarpetaOrigen(treeId) {
+      const ul = document.getElementById(treeId);
+      ul.innerHTML = '<li>⏳ Consultando servidor Railway...</li>';
+      try {
+        const response = await fetch('/health');
+        if (response.ok) {
+          ul.innerHTML = '<li>📁 Carpeta Principal (Conexión exitosa)</li>';
+        } else {
+          ul.innerHTML = '<li style="color:red;">❌ Error al conectar con Railway</li>';
+        }
+      } catch (err) {
+        ul.innerHTML = '<li style="color:red;">❌ Error de red</li>';
+      }
+    }
+  </script>
+</body>
+</html>
