@@ -4,614 +4,118 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Panel Maestro Integrado</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  
+  <!-- LIBRERÍAS EXTERNAS -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- TODO EL CSS EMBEBIDO AQUÍ -->
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --primary-light: #eff6ff;
+      --accent-orange: #d97706;
+      --accent-orange-hover: #b45309;
+      --accent-purple: #9333ea;
+      --accent-purple-hover: #7e22ce;
+      --success: #16a34a;
+      --success-bg: #dcfce7;
+      --warning: #b45309;
+      --warning-bg: #fef3c7;
+      --danger: #dc2626;
+      --danger-bg: #fee2e2;
+      --info-bg: #f0f9ff;
+      --info-border: #bae6fd;
+      --bg-main: #f1f5f9;
+      --bg-card: #ffffff;
+      --bg-subtle: #f8fafc;
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-light: #94a3b8;
+      --border: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+    body { background-color: var(--bg-main); color: var(--text-main); font-size: 13px; line-height: 1.4; }
+
+    /* LOGIN */
+    .login-container { display: flex; justify-content: center; align-items: center; min-height: 100vh; background: radial-gradient(circle at top, #ffffff, var(--bg-main)); padding: 20px; }
+    .login-card { background: var(--bg-card); width: 100%; max-width: 390px; padding: 40px 32px; border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); border: 1px solid var(--border); text-align: center; }
+    .login-icon { width: 52px; height: 52px; background: var(--primary); color: #ffffff; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 22px; }
+    .login-card h2 { font-size: 20px; font-weight: 700; color: var(--text-main); margin-bottom: 4px; }
+    .login-card .subtitle { color: var(--text-light); font-size: 13px; margin-bottom: 24px; }
+    .input-group { text-align: left; margin-bottom: 16px; }
+    .input-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+    .input-wrapper { position: relative; display: flex; align-items: center; }
+    .input-wrapper i { position: absolute; left: 12px; color: var(--text-light); font-size: 14px; }
+    .input-wrapper input, .form-input, .form-select { width: 100%; padding: 9px 12px 9px 36px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 12.5px; outline: none; }
+    .form-input, .form-select { padding-left: 12px; }
+
+    /* DASHBOARD */
+    .dashboard-container { display: flex; flex-direction: column; min-height: 100vh; }
+    .main-header { height: 56px; background: var(--bg-card); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 20px; sticky: top; z-index: 100; }
+    .header-left { display: flex; align-items: center; gap: 16px; }
+    .system-title { font-size: 16px; font-weight: 700; color: var(--text-main); }
+    .header-right { display: flex; align-items: center; gap: 20px; }
+    .user-profile { display: flex; align-items: center; gap: 10px; }
+    .avatar { width: 32px; height: 32px; background: var(--text-main); color: #ffffff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; }
+
+    .app-body { display: flex; flex: 1; }
+    .sidebar { width: 230px; background: var(--bg-card); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 16px 0; }
+    .nav-label { font-size: 10px; font-weight: 700; color: var(--text-light); padding: 0 20px 8px; }
+    .nav-item { display: flex; align-items: center; padding: 9px 20px; color: var(--text-muted); text-decoration: none; font-size: 12.5px; font-weight: 500; gap: 12px; border-left: 3px solid transparent; }
+    .nav-item.active { background: var(--primary-light); color: var(--primary); border-left-color: var(--primary); font-weight: 600; }
+
+    .main-content { flex: 1; padding: 24px; overflow-y: auto; }
+    .grid-layout { display: grid; grid-template-columns: 430px 1fr; gap: 20px; }
+    .grid-full { grid-column: 1 / -1; }
+    .card { background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border); padding: 20px; box-shadow: var(--shadow-sm); }
+    .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .card-header h2 { font-size: 15px; font-weight: 700; color: var(--text-main); }
+
+    /* BOTONES Y PASOS */
+    .btn-primary { background: var(--primary); color: #ffffff; border: none; padding: 9px 14px; border-radius: var(--radius-sm); font-weight: 600; cursor: pointer; }
+    .btn-secondary { background: #ffffff; border: 1px solid var(--border-strong); color: var(--text-muted); border-radius: var(--radius-sm); padding: 9px 14px; font-weight: 600; cursor: pointer; }
+    .btn-action-orange { background: var(--accent-orange); color: #ffffff; border: none; padding: 9px 14px; border-radius: var(--radius-sm); font-weight: 600; cursor: pointer; }
+    .btn-action-purple { background: var(--accent-purple); color: #ffffff; border: none; padding: 9px 14px; border-radius: var(--radius-sm); font-weight: 600; cursor: pointer; }
+    .btn-block { width: 100%; display: block; }
+
+    .steps-tabs { display: flex; background: var(--bg-subtle); border-radius: var(--radius-md); padding: 4px; margin-bottom: 14px; border: 1px solid var(--border); }
+    .step-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 7px 0; cursor: pointer; border-radius: var(--radius-sm); font-weight: 600; font-size: 12px; color: var(--text-light); }
+    .step-number { width: 22px; height: 22px; border-radius: 50%; background: var(--border-strong); color: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 11px; }
+    .step-tab.active { background: #ffffff; color: var(--accent-orange); box-shadow: var(--shadow-sm); }
+    .step-tab.active .step-number { background: var(--accent-orange); }
+
+    /* TABLAS */
+    .table-container { overflow-x: auto; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 11.5px; text-align: left; }
+    .data-table th { background: var(--bg-subtle); color: var(--text-muted); font-weight: 700; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    .data-table td { padding: 10px 12px; border-bottom: 1px solid var(--bg-subtle); color: var(--text-muted); }
+
+    .badge-tag { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+    .badge-blue { background: #dbeafe; color: #1e40af; }
+    .badge-cyan { background: #cff4fc; color: #055160; }
+    .status-indicator { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+    .status-generating { color: var(--primary); }
+    .status-success { color: var(--success); }
+    .status-pill { padding: 3px 10px; border-radius: 12px; font-weight: 600; font-size: 10.5px; }
+    .pill-success { background: var(--success-bg); color: var(--success); }
+
+    .tree-container { max-height: 180px; overflow-y: auto; background: var(--bg-subtle); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 8px 10px; }
+    .tree-container ul { list-style: none; padding-left: 8px; }
+    .tree-node { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11.5px; }
+    .tree-node .toggle { color: var(--primary); font-weight: 700; cursor: pointer; }
+    .info-banner { background: var(--info-bg); border: 1px solid var(--info-border); color: #0369a1; padding: 9px 12px; border-radius: var(--radius-sm); font-size: 11.5px; margin-bottom: 12px; }
+    .purple-box { background: #faf5ff; border: 1px solid #e9d5ff; padding: 12px; border-radius: var(--radius-sm); }
+    .mt-5 { margin-top: 5px; } .mt-10 { margin-top: 10px; } .mt-15 { margin-top: 15px; }
+    .row-buttons { display: flex; gap: 8px; } .row-buttons button { flex: 1; }
+  </style>
 </head>
-<body>
-
-  <!-- 1. PANTALLA DE ACCESO (LOGIN) -->
-  <div id="login-view" class="login-container">
-    <div class="login-card">
-      <div class="login-icon">
-        <i class="fa-solid fa-lock"></i>
-      </div>
-      <h2>Acceso al Sistema</h2>
-      <p class="subtitle">Panel Maestro Integrado</p>
-      
-      <form id="login-form" onsubmit="handleLogin(event)">
-        <div class="input-group">
-          <label for="username">Usuario</label>
-          <div class="input-wrapper">
-            <i class="fa-regular fa-user"></i>
-            <input type="text" id="username" placeholder="Ingrese su usuario" required value="jadmin">
-          </div>
-        </div>
-
-        <div class="input-group">
-          <label for="password">Contraseña</label>
-          <div class="input-wrapper">
-            <i class="fa-solid fa-lock"></i>
-            <input type="password" id="password" placeholder="Ingrese su contraseña" required value="••••••••">
-          </div>
-        </div>
-
-        <div class="form-options">
-          <label class="remember-me">
-            <input type="checkbox" id="remember" checked>
-            <span>Recordarme</span>
-          </label>
-        </div>
-
-        <button type="submit" class="btn-primary btn-block">Iniciar sesión</button>
-      </form>
-
-      <div class="login-footer">
-        © 2026 Panel Maestro Integrado - Todos los derechos reservados
-      </div>
-    </div>
-  </div>
-
-  <!-- 2. DASHBOARD / INTERFAZ PRINCIPAL -->
-  <div id="dashboard-view" class="dashboard-container" style="display: none;">
-    
-    <!-- HEADER SUPERIOR -->
-    <header class="main-header">
-      <div class="header-left">
-        <button class="btn-icon" id="toggle-sidebar">
-          <i class="fa-solid fa-bars"></i>
-        </button>
-        <h1 class="system-title">Panel Maestro Integrado</h1>
-      </div>
-
-      <div class="header-right">
-        <div class="header-action">
-          <i class="fa-regular fa-bell"></i>
-          <span class="badge">3</span>
-        </div>
-        <div class="user-profile">
-          <div class="avatar">J</div>
-          <div class="user-info">
-            <span class="user-name">jadmin</span>
-            <span class="user-role">Administrador</span>
-          </div>
-        </div>
-      </div>
-    </header>
-
-    <div class="app-body">
-      <!-- SIDEBAR IZQUIERDO -->
-      <aside class="sidebar">
-        <div class="nav-section">
-          <div class="nav-label">INICIO</div>
-          <a href="#" class="nav-item"><i class="fa-solid fa-house"></i> Inicio</a>
-        </div>
-
-        <div class="nav-section">
-          <div class="nav-label">MÓDULOS PRINCIPALES</div>
-          <a href="#" class="nav-item active" id="nav-caratulas" onclick="switchTab('tabCaratulas')"><i class="fa-regular fa-file-lines"></i> Carátulas</a>
-          <a href="#" class="nav-item" id="nav-compilar" onclick="switchTab('tabCompilador')"><i class="fa-solid fa-layer-group"></i> Compilar</a>
-          <a href="#" class="nav-item" id="nav-tomos" onclick="switchTab('tabTomos')"><i class="fa-solid fa-book"></i> Tomos</a>
-          <a href="#" class="nav-item"><i class="fa-solid fa-list-check"></i> Cola de Solicitudes <span class="nav-badge">8</span></a>
-          <a href="#" class="nav-item"><i class="fa-solid fa-clock-rotate-left"></i> Historial</a>
-        </div>
-
-        <div class="sidebar-footer">
-          <a href="#" class="nav-item logout-link" onclick="handleLogout()"><i class="fa-solid fa-arrow-right-from-bracket"></i> Cerrar sesión</a>
-        </div>
-      </aside>
-
-      <!-- CONTENIDO DE TRABAJO -->
-      <main class="main-content">
-        <div class="grid-layout">
-          
-          <!-- COLUMNA IZQUIERDA: CONTENEDOR DE MODULOS Y PASOS -->
-          <div class="card module-card">
-            <div class="card-header">
-              <h2>Panel Maestro Integrado</h2>
-              <i class="fa-solid fa-rotate btn-refresh" onclick="location.reload()"></i>
-            </div>
-
-            <!-- PASOS 1, 2, 3 -->
-            <div class="steps-tabs">
-              <div class="step-tab active" id="step-btn-1" onclick="switchTab('tabCaratulas')">
-                <span class="step-number">1</span>
-                <span class="step-text">Carátulas</span>
-              </div>
-              <div class="step-tab" id="step-btn-2" onclick="switchTab('tabCompilador')">
-                <span class="step-number">2</span>
-                <span class="step-text">Compilar</span>
-              </div>
-              <div class="step-tab" id="step-btn-3" onclick="switchTab('tabTomos')">
-                <span class="step-number">3</span>
-                <span class="step-text">Tomos</span>
-              </div>
-            </div>
-
-            <!-- VISTA PASO 1: CARÁTULAS -->
-            <div id="tabCaratulas" class="tab-content active">
-              <div class="info-banner">Hoja: <b>CARATULAS Y COMPILADOS</b> — C2 origen, C3 plantillas y C4 destino.</div>
-
-              <button class="btn-secondary btn-block" onclick="cargarArbol('treeCaratulas', 'C2', 'CARATULAS Y COMPILADOS')">Cargar origen (C2)</button>
-              
-              <div class="tree-container">
-                <ul id="treeCaratulas"><li class="small">Esperando carga de carpetas...</li></ul>
-              </div>
-
-              <div class="form-group mt-10">
-                <label>Plantilla</label>
-                <select id="selectPlantilla" class="form-select"><option value="">Cargando modelos...</option></select>
-              </div>
-
-              <div class="radio-group mt-10">
-                <label class="radio-option"><input type="radio" name="tipoCaratula" value="original" checked> Original: reemplaza XXXXXX/XXXXX/XXXX</label>
-                <label class="radio-option"><input type="radio" name="tipoCaratula" value="nueva"> Nueva: coloca prefijo en YYYY</label>
-              </div>
-
-              <div class="form-group mt-10">
-                <label>Ubicación de salida</label>
-                <div class="radio-group">
-                  <label class="radio-option"><input type="radio" name="saveType" value="automatico" checked onchange="actualizarModoGuardado()"> Replicar estructura en C4</label>
-                  <label class="radio-option"><input type="radio" name="saveType" value="manual" onchange="actualizarModoGuardado()"> Guardar directamente en C4 o subcarpeta</label>
-                </div>
-                <input id="nombreCarpetaManual" type="text" placeholder="Subcarpeta opcional dentro de C4" class="form-input mt-5" style="display:none;">
-              </div>
-
-              <div class="checkbox-box warning-box mt-10">
-                <label class="checkbox-option"><input type="checkbox" id="soloCarpetasCheck"> <b>Solo crear carpetas, sin generar PDF</b></label>
-              </div>
-
-              <button class="btn-action-orange btn-block action-car mt-10" onclick="ejecutarCaratulas()">Generar carátulas/carpetas</button>
-
-              <div class="purple-box mt-10">
-                <h4>Carátulas base de Anexos 11 y 13</h4>
-                <p>Crea únicamente las carátulas fijas de bloque y especiales de los Anexos 11 y 13.</p>
-                <button class="btn-action-purple btn-block action-car mt-5" onclick="ejecutarRestauracionBase()">Restaurar carátulas base</button>
-              </div>
-
-              <div id="statusCaratulas" class="status-msg mt-10"></div>
-            </div>
-
-            <!-- VISTA PASO 2: COMPILADOR -->
-            <div id="tabCompilador" class="tab-content" style="display:none;">
-              <div class="info-banner">Hoja: <b>CARATULAS Y COMPILADOS</b> — C2 origen, C4 carátulas, C6 salida y C8 servidor.</div>
-
-              <div class="row-buttons">
-                <button class="btn-secondary" onclick="cargarArbol('treeCompilador', 'C2', 'CARATULAS Y COMPILADOS')">Cargar directorios</button>
-                <button class="btn-secondary action-comp" onclick="probarServidor('CARATULAS Y COMPILADOS', 'C8', 'Compilador')">Probar servidor</button>
-              </div>
-
-              <div class="tree-container mt-10">
-                <ul id="treeCompilador"><li class="small">Esperando carga de directorios...</li></ul>
-              </div>
-
-              <div class="form-group mt-10">
-                <label>Si ya existe un compilado</label>
-                <select id="politicaDuplicados" class="form-select">
-                  <option value="nuevo">Crear uno nuevo con fecha y hora</option>
-                  <option value="reemplazar">Enviar los anteriores a la papelera</option>
-                  <option value="omitir">Omitir la carpeta</option>
-                </select>
-              </div>
-
-              <div class="info-banner mt-10">El servidor divide automáticamente cada compilado en bloques de hasta 600 páginas.</div>
-
-              <div class="row-buttons mt-10">
-                <button class="btn-primary action-comp" onclick="ejecutarCompilacion()">Compilar archivos</button>
-                <button class="btn-secondary action-comp" onclick="consultarPendientesCompilador()">Consultar pendientes</button>
-              </div>
-
-              <div id="statusCompilador" class="status-msg mt-10"></div>
-            </div>
-
-            <!-- VISTA PASO 3: TOMOS -->
-            <div id="tabTomos" class="tab-content" style="display:none;">
-              <div class="info-banner">Hoja: <b>TOMOS</b> — C3 plantilla, C4 tomos finales, C5 compilados, C6 índices y C8 servidor.</div>
-
-              <div class="row-buttons">
-                <button class="btn-secondary" onclick="cargarArbol('treeTomos', 'C5', 'TOMOS')">Cargar compilados (C5)</button>
-                <button class="btn-secondary action-tomos" onclick="probarServidor('TOMOS', 'C8', 'Tomos')">Probar servidor</button>
-              </div>
-
-              <label class="checkbox-option mt-5"><input type="checkbox" id="chkTomosAll" onchange="toggleSelectAll('treeTomos', this.checked)"> Seleccionar todas las carpetas</label>
-
-              <div class="tree-container mt-5">
-                <ul id="treeTomos"><li class="small">Esperando carga...</li></ul>
-              </div>
-
-              <div class="form-group mt-10">
-                <label>Tomos específicos</label>
-                <input id="numerosTomos" type="text" class="form-input" placeholder="Vacío = todos. Ejemplo: 1, 3, 5">
-              </div>
-
-              <div class="purple-box mt-10">
-                <label class="checkbox-option">
-                  <input type="checkbox" id="usarNumeracionManual" onchange="actualizarModoNumeracionTomos()">
-                  <b>Usar numeración manual</b>
-                </label>
-                <div id="bloqueNumeracionManual" style="display:none;" class="mt-5">
-                  <label>Número inicial de tomo</label>
-                  <input id="numeroInicialTomo" type="number" class="form-input" placeholder="Ej: 14" disabled>
-                  <label class="mt-5">Total general de tomos</label>
-                  <input id="totalGeneralTomos" type="number" class="form-input" placeholder="Ej: 40" disabled>
-                </div>
-              </div>
-
-              <label class="checkbox-option mt-10"><input type="checkbox" id="permitirSinCaratula"> Permitir fusionar un tomo sin carátula</label>
-
-              <div class="row-buttons mt-10">
-                <button class="btn-secondary action-tomos" onclick="ejecutarHerramientaTomos('calcular')">1. Proyectar</button>
-                <button class="btn-action-orange action-tomos" onclick="ejecutarHerramientaTomos('caratulas')">2. Índices</button>
-                <button class="btn-primary action-tomos" onclick="ejecutarHerramientaTomos('fusionar')">3. Fusionar</button>
-              </div>
-
-              <button class="btn-secondary btn-block action-tomos mt-5" onclick="consultarPendientesTomos()">Consultar tomos pendientes</button>
-
-              <div id="statusTomos" class="status-msg mt-10"></div>
-            </div>
-
-          </div>
-
-          <!-- COLUMNA DERECHA: COLA DE SOLICITUDES -->
-          <div class="card queue-card">
-            <div class="card-header">
-              <div>
-                <h2>Cola de Solicitudes</h2>
-                <p class="card-subtitle">Aquí se muestran las solicitudes en proceso.</p>
-              </div>
-            </div>
-
-            <div class="table-container">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th><input type="checkbox"></th>
-                    <th>#</th>
-                    <th>Tipo</th>
-                    <th>Origen (Carpeta)</th>
-                    <th>Estado</th>
-                  </tr>
-                </thead>
-                <tbody id="colaTableBody">
-                  <tr>
-                    <td><input type="checkbox"></td>
-                    <td>1</td>
-                    <td><span class="badge-tag badge-blue">CARÁTULA</span></td>
-                    <td>ANEXO 8: Cuadro de Afectados</td>
-                    <td><span class="status-indicator status-generating"><i class="fa-solid fa-spinner fa-spin"></i> Generando...</span></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- TABLA INFERIOR: HISTORIAL DE EJECUCIONES -->
-          <div class="card execution-summary-card grid-full">
-            <div class="card-header">
-              <h2><i class="fa-regular fa-clipboard"></i> Resumen de Ejecuciones</h2>
-            </div>
-
-            <div class="table-container">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>FECHA Y HORA</th>
-                    <th>SERVIDOR</th>
-                    <th>MÓDULO</th>
-                    <th>TAREA EJECUTADA</th>
-                    <th>ESTADO</th>
-                    <th>LINK DRIVE</th>
-                  </tr>
-                </thead>
-                <tbody id="historialTableBody">
-                  <tr>
-                    <td>28/8/2026 10:25:40</td>
-                    <td>Google Apps Script - Restauración</td>
-                    <td>Carátulas</td>
-                    <td>Generación de carátulas ANEXO 10</td>
-                    <td><span class="status-pill pill-success">Completado</span></td>
-                    <td><a href="#" class="link-drive">Ver archivo <i class="fa-solid fa-arrow-up-right-from-square"></i></a></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-        </div>
-      </main>
-    </div>
-  </div>
-
-  <script>
-    /* =========================================================
-       1. CONTROL DE ACCESO (LOGIN) Y NAVEGACIÓN DE VISTAS
-       ========================================================= */
-    function handleLogin(e) {
-      e.preventDefault();
-      document.getElementById('login-view').style.display = 'none';
-      document.getElementById('dashboard-view').style.display = 'block';
-      cargarPlantillas();
-      actualizarModoNumeracionTomos();
-    }
-
-    function handleLogout() {
-      document.getElementById('dashboard-view').style.display = 'none';
-      document.getElementById('login-view').style.display = 'flex';
-    }
-
-    function switchTab(tabId) {
-      // Ocultar todos los módulos
-      document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
-      document.querySelectorAll('.step-tab').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.sidebar .nav-item').forEach(el => el.classList.remove('active'));
-
-      // Activar la vista solicitada
-      document.getElementById(tabId).style.display = 'block';
-
-      if (tabId === 'tabCaratulas') {
-        document.getElementById('step-btn-1').classList.add('active');
-        document.getElementById('nav-caratulas').classList.add('active');
-      } else if (tabId === 'tabCompilador') {
-        document.getElementById('step-btn-2').classList.add('active');
-        document.getElementById('nav-compilar').classList.add('active');
-      } else if (tabId === 'tabTomos') {
-        document.getElementById('step-btn-3').classList.add('active');
-        document.getElementById('nav-tomos').classList.add('active');
-      }
-    }
-
-    /* =========================================================
-       2. CONEXIÓN DIRECTA CON BACKEND APPS SCRIPT
-       ========================================================= */
-    function cargarPlantillas() {
-      google.script.run
-        .withSuccessHandler(function(modelos) {
-          var select = document.getElementById('selectPlantilla');
-          select.innerHTML = '';
-          modelos = Array.isArray(modelos) ? modelos : [];
-          if (!modelos.length) {
-            select.innerHTML = '<option value="">No se encontraron plantillas</option>';
-            return;
-          }
-          modelos.forEach(function(m) {
-            var opt = document.createElement('option');
-            opt.value = m.id || '';
-            opt.textContent = m.name || 'Sin nombre';
-            select.appendChild(opt);
-          });
-        })
-        .withFailureHandler(function(err) {
-          document.getElementById('selectPlantilla').innerHTML = '<option value="">❌ Error al cargar</option>';
-        })
-        .obtenerModelosDeCaratula('CARATULAS Y COMPILADOS');
-    }
-
-    function cargarArbol(treeId, celda, hoja) {
-      var ul = document.getElementById(treeId);
-      ul.innerHTML = '<li class="small">Conectando con Google Drive...</li>';
-
-      google.script.run
-        .withSuccessHandler(function(idOrigen) {
-          pedirSubcarpetas(idOrigen, ul, true);
-        })
-        .withFailureHandler(function(error) {
-          ul.innerHTML = '<li class="small text-danger">❌ ' + extraerMensajeError(error) + '</li>';
-        })
-        .obtenerIdDesdeHoja(celda, hoja);
-    }
-
-    function pedirSubcarpetas(folderId, ul, esAnexo) {
-      ul.innerHTML = '<li class="small">Cargando carpetas...</li>';
-
-      google.script.run
-        .withSuccessHandler(function(carpetas) {
-          ul.innerHTML = '';
-          carpetas = Array.isArray(carpetas) ? carpetas : [];
-          if (!carpetas.length) {
-            ul.innerHTML = '<li class="small">Carpeta vacía o sin subcarpetas.</li>';
-            return;
-          }
-          carpetas.forEach(function(c) {
-            crearNodoCarpeta(ul, c, Boolean(esAnexo));
-          });
-        })
-        .withFailureHandler(function(error) {
-          ul.innerHTML = '<li class="small text-danger">❌ ' + extraerMensajeError(error) + '</li>';
-        })
-        .obtenerSubcarpetas(folderId);
-    }
-
-    function crearNodoCarpeta(ul, carpeta, esAnexo) {
-      var li = document.createElement('li');
-      li.className = 'tree-node';
-
-      var toggle = document.createElement('span');
-      toggle.className = 'toggle';
-      toggle.textContent = '[+]';
-      toggle.onclick = function() { expandir(toggle, carpeta.id); };
-
-      var label = document.createElement('label');
-      var chk = document.createElement('input');
-      chk.type = 'checkbox';
-      chk.className = 'folder-chk';
-      chk.value = carpeta.id;
-      chk.setAttribute('data-name', carpeta.name);
-
-      label.appendChild(chk);
-      label.appendChild(document.createTextNode(' 📁 ' + carpeta.name));
-
-      li.appendChild(toggle);
-      li.appendChild(label);
-
-      if (esAnexo) {
-        var btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'btn-mini';
-        btn.textContent = 'Seleccionar todo';
-        btn.onclick = function(e) {
-          e.stopPropagation();
-          chk.checked = true;
-          expandir(toggle, carpeta.id);
-        };
-        li.appendChild(btn);
-      }
-
-      ul.appendChild(li);
-    }
-
-    function expandir(toggle, folderId) {
-      var li = toggle.parentNode;
-      var existente = li.querySelector('ul');
-      if (existente) {
-        existente.remove();
-        toggle.textContent = '[+]';
-        return;
-      }
-      toggle.textContent = '[-]';
-      var subUl = document.createElement('ul');
-      li.appendChild(subUl);
-      pedirSubcarpetas(folderId, subUl, false);
-    }
-
-    function obtenerSeleccionados(treeId) {
-      var salida = [];
-      document.getElementById(treeId).querySelectorAll('.folder-chk:checked').forEach(function(chk) {
-        salida.push({ id: chk.value, name: chk.getAttribute('data-name') });
-      });
-      return salida;
-    }
-
-    function actualizarModoGuardado() {
-      var manual = document.querySelector('input[name="saveType"]:checked').value === 'manual';
-      document.getElementById('nombreCarpetaManual').style.display = manual ? 'block' : 'none';
-    }
-
-    function actualizarModoNumeracionTomos() {
-      var check = document.getElementById('usarNumeracionManual');
-      var bloque = document.getElementById('bloqueNumeracionManual');
-      var activo = Boolean(check && check.checked);
-
-      if (bloque) bloque.style.display = activo ? 'block' : 'none';
-      document.getElementById('numeroInicialTomo').disabled = !activo;
-      document.getElementById('totalGeneralTomos').disabled = !activo;
-    }
-
-    function toggleSelectAll(treeId, checked) {
-      document.getElementById(treeId).querySelectorAll('.folder-chk').forEach(function(chk) {
-        chk.checked = checked;
-      });
-    }
-
-    function mostrarMensaje(seccion, resultado, esError) {
-      var div = document.getElementById('status' + seccion);
-      var mensaje = typeof resultado === 'string' ? resultado : (resultado && resultado.mensaje ? resultado.mensaje : JSON.stringify(resultado));
-      div.style.display = 'block';
-      div.className = 'status-msg ' + (esError ? 'msg-error' : 'msg-success');
-      div.textContent = mensaje;
-    }
-
-    function extraerMensajeError(error) {
-      return error && error.message ? error.message : String(error || 'Error desconocido');
-    }
-
-    /* =========================================================
-       3. EJECUCIÓN DE PROCESOS (CARÁTULAS, COMPILAR Y TOMOS)
-       ========================================================= */
-    function ejecutarCaratulas() {
-      var seleccionados = obtenerSeleccionados('treeCaratulas');
-      if (!seleccionados.length) return alert('Selecciona al menos una carpeta.');
-
-      var soloCarpetas = document.getElementById('soloCarpetasCheck').checked;
-      var idPlantilla = document.getElementById('selectPlantilla').value;
-      if (!soloCarpetas && !idPlantilla) return alert('Selecciona una plantilla válida.');
-
-      var ubicacion = {
-        tipo: document.querySelector('input[name="saveType"]:checked').value,
-        soloCarpetas: soloCarpetas,
-        nombreNuevaCarpeta: document.getElementById('nombreCarpetaManual').value
-      };
-      var caratula = {
-        idPlantilla: idPlantilla,
-        tipo: document.querySelector('input[name="tipoCaratula"]:checked').value
-      };
-
-      mostrarMensaje('Caratulas', '⏳ Procesando carátulas...');
-
-      google.script.run
-        .withSuccessHandler(function(res) { mostrarMensaje('Caratulas', res); })
-        .withFailureHandler(function(err) { mostrarMensaje('Caratulas', '❌ ' + extraerMensajeError(err), true); })
-        .procesarSeleccionados(seleccionados, ubicacion, caratula);
-    }
-
-    function ejecutarRestauracionBase() {
-      var idPlantilla = document.getElementById('selectPlantilla').value;
-      if (!idPlantilla) return alert('Selecciona una plantilla válida.');
-
-      mostrarMensaje('Caratulas', '⏳ Restaurando carátulas base...');
-      google.script.run
-        .withSuccessHandler(function(res) { mostrarMensaje('Caratulas', res); })
-        .withFailureHandler(function(err) { mostrarMensaje('Caratulas', '❌ ' + extraerMensajeError(err), true); })
-        .restaurarCaratulasBase(idPlantilla, document.querySelector('input[name="tipoCaratula"]:checked').value);
-    }
-
-    function ejecutarCompilacion() {
-      var seleccionados = obtenerSeleccionados('treeCompilador');
-      if (!seleccionados.length) return alert('Selecciona al menos una carpeta.');
-
-      mostrarMensaje('Compilador', '⏳ Enviando compilación al servidor...');
-
-      google.script.run
-        .withSuccessHandler(function(res) { mostrarMensaje('Compilador', res); })
-        .withFailureHandler(function(err) { mostrarMensaje('Compilador', '❌ ' + extraerMensajeError(err), true); })
-        .procesarCompilacionSegunModo(seleccionados, 'COLAB', {
-          duplicados: document.getElementById('politicaDuplicados').value
-        });
-    }
-
-    function consultarPendientesCompilador() {
-      google.script.run
-        .withSuccessHandler(function(res) { mostrarMensaje('Compilador', res); })
-        .withFailureHandler(function(err) { mostrarMensaje('Compilador', '❌ ' + extraerMensajeError(err), true); })
-        .consultarCompilacionesPendientes();
-    }
-
-    function ejecutarHerramientaTomos(tipo) {
-      var seleccionados = obtenerSeleccionados('treeTomos');
-      if (!seleccionados.length) return alert('Selecciona al menos una carpeta.');
-
-      var config = {
-        numerosTomos: document.getElementById('numerosTomos').value,
-        permitirSinCaratula: document.getElementById('permitirSinCaratula').checked,
-        usarNumeracionManual: document.getElementById('usarNumeracionManual').checked,
-        numeroInicialTomo: document.getElementById('numeroInicialTomo').value,
-        totalGeneralTomos: document.getElementById('totalGeneralTomos').value
-      };
-
-      mostrarMensaje('Tomos', '⏳ Procesando tomos...');
-
-      var runner = google.script.run
-        .withSuccessHandler(function(res) { mostrarMensaje('Tomos', res); })
-        .withFailureHandler(function(err) { mostrarMensaje('Tomos', '❌ ' + extraerMensajeError(err), true); });
-
-      if (tipo === 'calcular') runner.herramienta1_Calcular(seleccionados, config);
-      else if (tipo === 'caratulas') runner.herramienta2_Caratulas(seleccionados, config);
-      else if (tipo === 'fusionar') runner.herramienta3_GenerarTomos(seleccionados, config);
-    }
-
-    function consultarPendientesTomos() {
-      google.script.run
-        .withSuccessHandler(function(res) { mostrarMensaje('Tomos', res); })
-        .withFailureHandler(function(err) { mostrarMensaje('Tomos', '❌ ' + extraerMensajeError(err), true); })
-        .consultarTomosPendientes();
-    }
-
-    function probarServidor(hoja, celda, seccion) {
-      mostrarMensaje(seccion, '⏳ Verificando conexión...');
-      google.script.run
-        .withSuccessHandler(function(res) { mostrarMensaje(seccion, res); })
-        .withFailureHandler(function(err) { mostrarMensaje(seccion, '❌ ' + extraerMensajeError(err), true); })
-        .verificarServidor(hoja, celda);
-    }
-  </script>
-</body>
-</html>
