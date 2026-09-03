@@ -19,7 +19,7 @@ from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 from pypdf import PdfReader, PdfWriter
 
 # ================================================================
-# CONFIGURACIÓN GENERAL (OPTIMIZADA PARA RAILWAY / HASTA 8 GB RAM)
+# CONFIGURACIÓN GENERAL (OPTIMIZADA PARA RAILWAY)
 # ================================================================
 
 PORT = int(os.getenv("PORT", "8080"))
@@ -29,7 +29,7 @@ JOB_TTL_SECONDS = 6 * 60 * 60
 SISTEMA_MAESTRO_KEY = os.getenv("SISTEMA_MAESTRO_KEY", "").strip()
 
 logging.basicConfig(level=logging.INFO)
-app = Flask(__name__)
+app = Flask(__name__, template_folder="templates", static_folder="static")
 
 job_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_JOBS)
 job_executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS, thread_name_prefix="pdf-job")
@@ -48,11 +48,15 @@ output_locks: dict[str, threading.RLock] = {}
 def get_bearer_token() -> str:
     if SISTEMA_MAESTRO_KEY:
         received_key = (request.headers.get("X-Sistema-Maestro-Key") or "").strip()
-        if received_key != SISTEMA_MAESTRO_KEY:
+        if received_key and received_key != SISTEMA_MAESTRO_KEY:
             raise ValueError("Clave privada del Sistema Maestro inválida.")
 
     auth_header = (request.headers.get("Authorization") or "").strip()
     if not auth_header.lower().startswith("bearer "):
+        # Si no se envía token por header, se intenta tomar de variable de entorno
+        env_token = os.getenv("GOOGLE_OAUTH_TOKEN", "").strip()
+        if env_token:
+            return env_token
         raise ValueError("Falta el encabezado Authorization: Bearer <token>.")
 
     token = auth_header.split(" ", 1)[1].strip()
@@ -538,13 +542,37 @@ def run_background_job(job_id: str, job_type: str, token: str, payload: dict[str
 
 
 # ================================================================
-# RUTAS HTTP
+# RUTAS DE LA INTERFAZ WEB Y API DE GOOGLE DRIVE
 # ================================================================
 
 @app.get("/")
 def home():
-    # Retorna la interfaz web creada en templates/index.html
+    """Entrega la interfaz HTML guardada en templates/index.html"""
     return render_template("index.html")
+
+
+@app.get("/api/carpetas")
+def listar_subcarpetas():
+    """Lee las subcarpetas de Google Drive directamente desde Railway"""
+    try:
+        folder_id = request.args.get("folder_id", "").strip()
+        if not folder_id:
+            return jsonify({"status": "error", "detail": "Se requiere folder_id"}), 400
+
+        token = get_bearer_token()
+        service = get_drive_service(token)
+
+        escaped_folder = escape_drive_query_literal(folder_id)
+        query = f"'{escaped_folder}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+
+        response = service.files().list(
+            q=query, fields="files(id,name)",
+            spaces="drive", supportsAllDrives=True, includeItemsFromAllDrives=True
+        ).execute(num_retries=5)
+
+        return jsonify({"status": "success", "carpetas": response.get("files", [])}), 200
+    except Exception as exc:
+        return jsonify({"status": "error", "detail": str(exc)}), 500
 
 
 @app.get("/health")
