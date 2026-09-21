@@ -3,6 +3,8 @@ from __future__ import annotations
 import gc
 import io
 import logging
+import shutil
+import subprocess
 import os
 import re
 import threading
@@ -502,6 +504,188 @@ def compile_in_parts_heavy(
         gc.collect()
 
 
+
+def compile_in_parts_heavy_qpdf(
+    service, file_ids: list[str], destination_folder_id: str,
+    output_filename: str, page_limit: int,
+    progress_callback: ProgressCallback | None = None,
+    replace_existing: bool = False, strict_mode: bool = True,
+    expected_source_count: int = 0,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """PDFs gigantes: qpdf como proceso externo; no se cargan páginas en Python.
+
+    Descarga a disco con la función existente y conserva el orden y la división
+    por límite de páginas. No modifica el flujo normal ni las rutas HTTP.
+    """
+    qpdf_bin = shutil.which("qpdf")
+    if not qpdf_bin:
+        raise RuntimeError(
+            "Falta qpdf en Railway. Agrega el Dockerfile del PASO 2 en la raíz "
+            "del repositorio y despliega de nuevo."
+        )
+    if page_limit < 1:
+        raise ValueError("El límite de páginas debe ser mayor que cero.")
+    if expected_source_count and len(file_ids) != expected_source_count:
+        raise ValueError("La cantidad de fuentes recibidas no coincide con la esperada.")
+
+    def run_qpdf(args: list[str], timeout: int = 3600) -> str:
+        try:
+            result = subprocess.run(
+                [qpdf_bin, *args], capture_output=True, text=True,
+                check=False, timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"qpdf agotó el tiempo de {timeout}s") from exc
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "error no detallado").strip()
+            raise RuntimeError(
+                f"qpdf terminó con código {result.returncode}: {detail[:800]}"
+            )
+        return result.stdout.strip()
+
+    def page_count(path: str) -> int:
+        result = run_qpdf(["--show-npages", path], timeout=600)
+        try:
+            count = int(result.splitlines()[-1].strip())
+        except (ValueError, IndexError) as exc:
+            raise ValueError(f"qpdf no devolvió páginas válidas para {os.path.basename(path)}") from exc
+        if count < 1:
+            raise ValueError("El PDF no contiene páginas.")
+        return count
+
+    base_name, extension = split_pdf_extension(output_filename)
+    parts: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    segments: list[tuple[str, int, int]] = []
+    pages_in_current_part = 0
+    part_number = 1
+
+    def report(**changes: Any) -> None:
+        if progress_callback:
+            progress_callback(**changes)
+
+    def flush_current(temp_dir: str, preserve_path: str | None = None,
+                      is_split: bool = False) -> None:
+        nonlocal segments, pages_in_current_part, part_number
+        if not segments:
+            return
+        count_expected = pages_in_current_part
+        if is_split or part_number > 1:
+            name = f"{base_name} (Parte {part_number}) ({count_expected} páginas){extension}"
+        else:
+            name = f"{base_name} ({count_expected} páginas){extension}"
+
+        output_path = os.path.join(temp_dir, f"qpdf_compilado_{uuid.uuid4().hex}.pdf")
+        sources_to_clean = {path for path, _, _ in segments}
+        cmd = ["--empty", "--pages"]
+        for path, start, end in segments:
+            pages = str(start) if start == end else f"{start}-{end}"
+            cmd.extend((path, pages))
+        cmd.extend(("--", output_path))
+
+        try:
+            run_qpdf(cmd)
+            if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+                raise RuntimeError("qpdf no generó un PDF válido en disco.")
+            actual_pages = page_count(output_path)
+            if actual_pages != count_expected:
+                raise RuntimeError(
+                    f"Integridad: se esperaban {count_expected} páginas y qpdf generó {actual_pages}."
+                )
+            uploaded = upload_pdf_path(
+                service, output_path, destination_folder_id, name,
+                replace_existing=replace_existing,
+            )
+            uploaded["paginas"] = count_expected
+            parts.append(uploaded)
+            report(
+                parts_created=len(parts), pages_in_current_part=0,
+                last_created_file=uploaded.get("final_name", name),
+                processing_mode="heavy_qpdf",
+            )
+        finally:
+            try:
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+            except OSError:
+                app.logger.warning("No se pudo eliminar temporal de qpdf: %s", output_path)
+
+        # Sólo después de confirmar la subida: liberar las fuentes ya utilizadas.
+        # Si un PDF ocupa más de una parte, se conserva hasta acabar sus páginas.
+        for old_path in sources_to_clean:
+            if old_path != preserve_path:
+                try:
+                    os.remove(old_path)
+                except FileNotFoundError:
+                    pass
+        segments = []
+        pages_in_current_part = 0
+        part_number += 1
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="maestro_qpdf_pesado_") as temp_dir:
+            for index, file_id in enumerate(file_ids, start=1):
+                source_path = None
+                try:
+                    source_path = download_drive_file_to_path(service, str(file_id), temp_dir)
+                    num_pages = page_count(source_path)
+                    next_page = 1
+                    while next_page <= num_pages:
+                        available = page_limit - pages_in_current_part
+                        if available <= 0:
+                            flush_current(temp_dir, preserve_path=source_path, is_split=True)
+                            available = page_limit
+                        end_page = min(num_pages, next_page + available - 1)
+                        segments.append((source_path, next_page, end_page))
+                        pages_in_current_part += end_page - next_page + 1
+                        next_page = end_page + 1
+                        if pages_in_current_part == page_limit:
+                            keep = source_path if next_page <= num_pages else None
+                            flush_current(temp_dir, preserve_path=keep, is_split=True)
+
+                    # Si el último segmento ya se subió, no hace falta
+                    # conservar esta fuente hasta el final del trabajo.
+                    if source_path and not any(seg[0] == source_path for seg in segments):
+                        if os.path.exists(source_path):
+                            os.remove(source_path)
+
+                    report(
+                        processed_files=index, total_files=len(file_ids),
+                        parts_created=len(parts),
+                        pages_in_current_part=pages_in_current_part,
+                        current_file_id=str(file_id),
+                        processing_mode="heavy_qpdf",
+                    )
+                except Exception as exc:
+                    # Un error al construir/subir una parte no permite ignorar
+                    # sólo una fuente sin arriesgar un PDF incompleto.
+                    # Fallar y revertir es preferible a reportar éxito parcial.
+                    if segments or parts:
+                        raise
+                    errors.append({"file_id": str(file_id), "detail": str(exc)})
+                    report(
+                        processed_files=index, total_files=len(file_ids),
+                        parts_created=len(parts),
+                        pages_in_current_part=pages_in_current_part,
+                        current_file_id=str(file_id), last_error=str(exc),
+                        processing_mode="heavy_qpdf",
+                    )
+                    if strict_mode:
+                        return [], errors
+                finally:
+                    if source_path and not any(seg[0] == source_path for seg in segments):
+                        try:
+                            if os.path.exists(source_path):
+                                os.remove(source_path)
+                        except OSError:
+                            pass
+            flush_current(temp_dir, is_split=bool(parts))
+            return parts, errors
+    except Exception:
+        if parts:
+            trash_file_ids(service, [p.get("id", "") for p in parts])
+        raise
+
 def compile_in_parts(
     service, file_ids: list[str], destination_folder_id: str,
     output_filename: str, page_limit: int,
@@ -534,11 +718,11 @@ def compile_in_parts(
         )
         if progress_callback:
             progress_callback(
-                processing_mode="heavy_disk",
+                processing_mode="heavy_qpdf",
                 heavy_files=len(heavy_sources),
                 heavy_threshold_mb=HEAVY_PDF_THRESHOLD_MB,
             )
-        return compile_in_parts_heavy(
+        return compile_in_parts_heavy_qpdf(
             service=service,
             file_ids=file_ids,
             destination_folder_id=destination_folder_id,
