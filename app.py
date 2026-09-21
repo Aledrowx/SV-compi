@@ -17,6 +17,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 from pypdf import PdfReader, PdfWriter
+import fitz  # PyMuPDF: ruta especial para PDFs gigantes, sin alterar el flujo normal
 
 # ================================================================
 # CONFIGURACIÓN GENERAL (OPTIMIZADA PARA RAILWAY / HASTA 8 GB RAM)
@@ -28,6 +29,11 @@ UPLOAD_CHUNK_SIZE = max(256 * 1024, int(os.getenv("UPLOAD_CHUNK_SIZE", str(4 * 1
 JOB_TTL_SECONDS = max(60, int(os.getenv("JOB_TTL_SECONDS", str(6 * 60 * 60))))
 GC_COLLECT_EVERY_FILES = max(5, int(os.getenv("GC_COLLECT_EVERY_FILES", "20")))
 SISTEMA_MAESTRO_KEY = os.getenv("SISTEMA_MAESTRO_KEY", "").strip()
+
+# PDFs gigantes: solo activa una ruta alternativa cuando una fuente supera
+# este tamaño. Los PDFs normales siguen usando el compilador actual (pypdf).
+HEAVY_PDF_THRESHOLD_MB = max(100, int(os.getenv("HEAVY_PDF_THRESHOLD_MB", "150")))
+HEAVY_PDF_THRESHOLD_BYTES = HEAVY_PDF_THRESHOLD_MB * 1024 * 1024
 
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
@@ -316,6 +322,186 @@ def get_public_job(job_id: str) -> dict[str, Any] | None:
 
 ProgressCallback = Callable[..., None]
 
+
+def get_drive_pdf_size(service, file_id: str) -> tuple[int, str]:
+    """Devuelve (tamaño_en_bytes, nombre) sin descargar el PDF."""
+    meta = service.files().get(
+        fileId=str(file_id),
+        fields="id,name,size,mimeType",
+        supportsAllDrives=True,
+    ).execute(num_retries=5)
+    try:
+        size = int(meta.get("size") or 0)
+    except (TypeError, ValueError):
+        size = 0
+    return size, str(meta.get("name") or file_id)
+
+
+def compile_in_parts_heavy(
+    service, file_ids: list[str], destination_folder_id: str,
+    output_filename: str, page_limit: int,
+    progress_callback: ProgressCallback | None = None,
+    replace_existing: bool = False, strict_mode: bool = True,
+    expected_source_count: int = 0,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """
+    Ruta exclusiva para PDFs gigantes.
+
+    Descarga cada fuente a /tmp con la función existente y usa PyMuPDF
+    para copiar páginas desde archivos físicos. No reemplaza el flujo normal:
+    compile_in_parts() solo entra aquí si detecta una fuente >= umbral pesado.
+    """
+    if page_limit < 1:
+        raise ValueError("El límite de páginas debe ser mayor que cero.")
+    if expected_source_count and len(file_ids) != expected_source_count:
+        raise ValueError("La cantidad de fuentes recibidas no coincide con la esperada.")
+
+    base_name, extension = split_pdf_extension(output_filename)
+    parts: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    part_number = 1
+    pages_in_current_part = 0
+    output_doc = fitz.open()
+
+    def report(**changes: Any) -> None:
+        if progress_callback:
+            progress_callback(**changes)
+
+    def flush_current(temp_dir: str, is_split: bool) -> None:
+        nonlocal output_doc, pages_in_current_part, part_number
+        if pages_in_current_part == 0:
+            return
+
+        if is_split or part_number > 1:
+            part_name = f"{base_name} (Parte {part_number}) ({pages_in_current_part} páginas){extension}"
+        else:
+            part_name = f"{base_name} ({pages_in_current_part} páginas){extension}"
+
+        output_path = os.path.join(temp_dir, f"compilado_pesado_{uuid.uuid4().hex}.pdf")
+        try:
+            # garbage=0 y deflate=False evitan recomprimir planos/imágenes gigantes.
+            # Esto prioriza bajo uso de RAM y velocidad; conserva los streams.
+            output_doc.save(output_path, garbage=0, deflate=False, clean=False)
+            output_doc.close()
+            output_doc = fitz.open()
+
+            uploaded = upload_pdf_path(
+                service,
+                output_path,
+                destination_folder_id,
+                part_name,
+                replace_existing=replace_existing,
+            )
+            uploaded["paginas"] = pages_in_current_part
+            parts.append(uploaded)
+            report(
+                parts_created=len(parts),
+                pages_in_current_part=0,
+                last_created_file=uploaded.get("final_name", part_name),
+                processing_mode="heavy_disk",
+            )
+        finally:
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except Exception:
+                    pass
+
+        pages_in_current_part = 0
+        part_number += 1
+        gc.collect()
+
+    total_files = len(file_ids)
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="maestro_compilar_pesado_") as temp_dir:
+            for index, file_id in enumerate(file_ids, start=1):
+                source_path = None
+                source_doc = None
+                try:
+                    source_path = download_drive_file_to_path(service, str(file_id), temp_dir)
+                    source_doc = fitz.open(source_path)
+
+                    if source_doc.needs_pass:
+                        # Igual que el flujo normal: solo intentamos contraseña vacía.
+                        if not source_doc.authenticate(""):
+                            raise ValueError(f"El PDF {file_id} está protegido con contraseña.")
+
+                    total_pages_source = source_doc.page_count
+                    start_page = 0
+
+                    while start_page < total_pages_source:
+                        available = page_limit - pages_in_current_part
+                        if available <= 0:
+                            flush_current(temp_dir, is_split=True)
+                            available = page_limit
+
+                        take = min(available, total_pages_source - start_page)
+                        end_page = start_page + take - 1
+
+                        # insert_pdf copia objetos PDF sin rasterizar las páginas.
+                        output_doc.insert_pdf(
+                            source_doc,
+                            from_page=start_page,
+                            to_page=end_page,
+                        )
+
+                        pages_in_current_part += take
+                        start_page += take
+
+                        if pages_in_current_part >= page_limit:
+                            flush_current(temp_dir, is_split=True)
+
+                    report(
+                        processed_files=index,
+                        total_files=total_files,
+                        parts_created=len(parts),
+                        pages_in_current_part=pages_in_current_part,
+                        current_file_id=str(file_id),
+                        processing_mode="heavy_disk",
+                    )
+
+                except Exception as exc:
+                    errors.append({"file_id": str(file_id), "detail": str(exc)})
+                    report(
+                        processed_files=index,
+                        total_files=total_files,
+                        parts_created=len(parts),
+                        pages_in_current_part=pages_in_current_part,
+                        current_file_id=str(file_id),
+                        last_error=str(exc),
+                        processing_mode="heavy_disk",
+                    )
+                    if strict_mode:
+                        try:
+                            output_doc.close()
+                        except Exception:
+                            pass
+                        trash_file_ids(service, [p.get("id", "") for p in parts])
+                        return [], errors
+                finally:
+                    if source_doc is not None:
+                        try:
+                            source_doc.close()
+                        except Exception:
+                            pass
+                    if source_path and os.path.exists(source_path):
+                        try:
+                            os.remove(source_path)
+                        except Exception:
+                            pass
+                    gc.collect()
+
+            flush_current(temp_dir, is_split=bool(parts))
+            return parts, errors
+    finally:
+        try:
+            output_doc.close()
+        except Exception:
+            pass
+        gc.collect()
+
+
 def compile_in_parts(
     service, file_ids: list[str], destination_folder_id: str,
     output_filename: str, page_limit: int,
@@ -327,6 +513,42 @@ def compile_in_parts(
         raise ValueError("El límite de páginas debe ser mayor que cero.")
     if expected_source_count and len(file_ids) != expected_source_count:
         raise ValueError("La cantidad de fuentes recibidas no coincide con la esperada.")
+
+    # Detectar PDF gigante sin descargarlo. Si aparece uno, usamos la ruta
+    # especial de bajo consumo de RAM. El flujo normal queda intacto.
+    heavy_sources: list[tuple[str, int, str]] = []
+    for _file_id in file_ids:
+        try:
+            _size, _name = get_drive_pdf_size(service, str(_file_id))
+            if _size >= HEAVY_PDF_THRESHOLD_BYTES:
+                heavy_sources.append((str(_file_id), _size, _name))
+        except Exception as _meta_exc:
+            # Si Drive no entrega el tamaño, no rompemos el comportamiento actual.
+            app.logger.warning("No se pudo leer tamaño de %s: %s", _file_id, _meta_exc)
+
+    if heavy_sources:
+        app.logger.warning(
+            "Modo PDF gigante activado. Umbral=%s MB | Fuentes=%s",
+            HEAVY_PDF_THRESHOLD_MB,
+            [f"{name} ({size / (1024 * 1024):.1f} MB)" for _, size, name in heavy_sources],
+        )
+        if progress_callback:
+            progress_callback(
+                processing_mode="heavy_disk",
+                heavy_files=len(heavy_sources),
+                heavy_threshold_mb=HEAVY_PDF_THRESHOLD_MB,
+            )
+        return compile_in_parts_heavy(
+            service=service,
+            file_ids=file_ids,
+            destination_folder_id=destination_folder_id,
+            output_filename=output_filename,
+            page_limit=page_limit,
+            progress_callback=progress_callback,
+            replace_existing=replace_existing,
+            strict_mode=strict_mode,
+            expected_source_count=expected_source_count,
+        )
 
     base_name, extension = split_pdf_extension(output_filename)
     parts: list[dict[str, Any]] = []
