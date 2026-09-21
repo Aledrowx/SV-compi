@@ -536,7 +536,13 @@ def compile_in_parts_heavy_qpdf(
             )
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"qpdf agotó el tiempo de {timeout}s") from exc
-        if result.returncode != 0:
+        # qpdf: 0 = correcto; 3 = advertencias recuperables; 2 = error real.
+        # Continuamos con advertencias, pero comprobamos páginas y archivo de
+        # salida en flush_current() antes de subir nada a Google Drive.
+        if result.returncode == 3:
+            detail = (result.stderr or "Advertencias sin detalle").strip()
+            app.logger.warning("qpdf recuperó un PDF con advertencias: %s", detail[:800])
+        elif result.returncode != 0:
             detail = (result.stderr or result.stdout or "error no detallado").strip()
             raise RuntimeError(
                 f"qpdf terminó con código {result.returncode}: {detail[:800]}"
