@@ -529,21 +529,81 @@ def compile_in_parts_heavy_qpdf(
         raise ValueError("La cantidad de fuentes recibidas no coincide con la esperada.")
 
     def run_qpdf(args: list[str], timeout: int = 3600) -> str:
+        # PASO 4: diagnósticos de la llamada a qpdf SIN modificar sus argumentos,
+        # la fusión, las carátulas ni el flujo normal. Los contadores de cgroup
+        # permiten detectar un OOM que no se vea en la gráfica de Railway.
+        def memory_snapshot() -> dict[str, Any]:
+            root = "/sys/fs/cgroup"
+            snapshot: dict[str, Any] = {}
+            for name in ("memory.current", "memory.peak", "memory.max"):
+                try:
+                    with open(os.path.join(root, name), "r", encoding="ascii") as f:
+                        raw = f.read().strip()
+                    snapshot[name] = int(raw) if raw.isdigit() else raw
+                except (OSError, ValueError):
+                    pass
+            try:
+                with open(os.path.join(root, "memory.events"), "r", encoding="ascii") as f:
+                    snapshot["memory.events"] = {
+                        key: int(value)
+                        for line in f
+                        for key, value in [line.strip().split()]
+                    }
+            except (OSError, ValueError):
+                pass
+            try:
+                snapshot["tmp_free_mb"] = round(
+                    shutil.disk_usage(tempfile.gettempdir()).free / (1024 * 1024), 1
+                )
+            except OSError:
+                pass
+            return snapshot
+
+        before = memory_snapshot()
+        operation = "fusionar" if "--pages" in args else "contar_paginas"
+        app.logger.warning(
+            "DIAG QPDF INICIO operacion=%s; memoria_y_disco=%s",
+            operation, before,
+        )
+        started = time.monotonic()
         try:
             result = subprocess.run(
                 [qpdf_bin, *args], capture_output=True, text=True,
                 check=False, timeout=timeout,
             )
         except subprocess.TimeoutExpired as exc:
+            app.logger.error(
+                "DIAG QPDF TIMEOUT operacion=%s segundos=%.1f despues=%s",
+                operation, time.monotonic() - started, memory_snapshot(),
+            )
             raise RuntimeError(f"qpdf agotó el tiempo de {timeout}s") from exc
+
+        after = memory_snapshot()
+        before_events = before.get("memory.events", {})
+        after_events = after.get("memory.events", {})
+        oom_delta = int(after_events.get("oom", 0)) - int(before_events.get("oom", 0))
+        killed_delta = int(after_events.get("oom_kill", 0)) - int(before_events.get("oom_kill", 0))
+        app.logger.warning(
+            "DIAG QPDF FIN operacion=%s rc=%s segundos=%.1f oom_delta=%s "
+            "oom_kill_delta=%s; antes=%s; despues=%s",
+            operation, result.returncode, time.monotonic() - started,
+            oom_delta, killed_delta, before, after,
+        )
+
         # qpdf: 0 = correcto; 3 = advertencias recuperables; 2 = error real.
-        # Continuamos con advertencias, pero comprobamos páginas y archivo de
-        # salida en flush_current() antes de subir nada a Google Drive.
+        # Los códigos negativos son señales: -9 = SIGKILL, NUNCA éxito.
         if result.returncode == 3:
             detail = (result.stderr or "Advertencias sin detalle").strip()
             app.logger.warning("qpdf recuperó un PDF con advertencias: %s", detail[:800])
         elif result.returncode != 0:
             detail = (result.stderr or result.stdout or "error no detallado").strip()
+            if result.returncode == -9:
+                diagnosis = (
+                    "cgroup registró OOM-kill durante esta operación"
+                    if killed_delta > 0 else
+                    "sin aumento de OOM-kill en este cgroup; revisar memoria, disco y eventos externos"
+                )
+                detail = f"SIGKILL (-9); {diagnosis}. {detail}"
             raise RuntimeError(
                 f"qpdf terminó con código {result.returncode}: {detail[:800]}"
             )
