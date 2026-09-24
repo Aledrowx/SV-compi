@@ -28,7 +28,7 @@ import fitz  # PyMuPDF: ruta especial para PDFs gigantes, sin alterar el flujo n
 # ================================================================
 
 PORT = int(os.getenv("PORT", "8080"))
-MAX_CONCURRENT_JOBS = max(1, int(os.getenv("MAX_CONCURRENT_JOBS", "1")))
+MAX_CONCURRENT_JOBS = max(1, int(os.getenv("MAX_CONCURRENT_JOBS", "2")))
 UPLOAD_CHUNK_SIZE = max(256 * 1024, int(os.getenv("UPLOAD_CHUNK_SIZE", str(4 * 1024 * 1024))))
 JOB_TTL_SECONDS = max(60, int(os.getenv("JOB_TTL_SECONDS", str(6 * 60 * 60))))
 GC_COLLECT_EVERY_FILES = max(5, int(os.getenv("GC_COLLECT_EVERY_FILES", "20")))
@@ -51,6 +51,8 @@ app.config.update(
 )
 
 job_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_JOBS)
+# TOMOS se serializan entre sí; el compilador conserva sus 2 workers originales.
+tomos_semaphore = threading.BoundedSemaphore(1)
 job_executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS, thread_name_prefix="pdf-job")
 jobs_lock = threading.RLock()
 jobs: dict[str, dict[str, Any]] = {}
@@ -1147,16 +1149,17 @@ def run_background_job(job_id: str, job_type: str, token: str, payload: dict[str
                     source_ids.append(caratula_id)
                 source_ids.extend(str(value).strip() for value in payload["file_ids"] if str(value).strip())
 
-                uploaded, total_pages, errors = assemble_tomo(
-                    service=service, source_ids=source_ids,
-                    destination_folder_id=str(payload["destination_folder_id"]),
-                    output_filename=str(payload["output_filename"]),
-                    progress_callback=progress_callback,
-                    replace_existing=as_bool(payload.get("replace_existing")),
-                    strict_mode=as_bool(payload.get("strict_mode", True)),
-                    expected_pages=int(payload.get("expected_pages") or 0),
-                    expected_source_count=int(payload.get("expected_source_count") or 0),
-                )
+                with tomos_semaphore:
+                    uploaded, total_pages, errors = assemble_tomo(
+                        service=service, source_ids=source_ids,
+                        destination_folder_id=str(payload["destination_folder_id"]),
+                        output_filename=str(payload["output_filename"]),
+                        progress_callback=progress_callback,
+                        replace_existing=as_bool(payload.get("replace_existing")),
+                        strict_mode=as_bool(payload.get("strict_mode", True)),
+                        expected_pages=int(payload.get("expected_pages") or 0),
+                        expected_source_count=int(payload.get("expected_source_count") or 0),
+                    )
 
                 if not uploaded:
                     failure = errors[-1] if errors else {"detail": "No se pudo leer ninguna página.",
@@ -1266,6 +1269,61 @@ def compilar_general():
         return jsonify({"status": "error", "detail": str(exc)}), 500
 
 
+
+
+# ================================================================
+# TOMOS: conteo REAL de páginas de PDFs sin cantidad en el nombre.
+# Se descarga UN archivo por vez, se cuenta con qpdf y se borra el
+# temporal. Independiente de las rutas del compilador y de carátulas.
+# ================================================================
+@app.post("/contar-paginas-tomos")
+def contar_paginas_tomos():
+    try:
+        token = get_bearer_token()
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or not isinstance(data.get("file_ids"), list):
+            return jsonify({"status": "error", "detail": "Se requiere file_ids (lista de IDs)."}), 400
+        file_ids = [str(item).strip() for item in data["file_ids"] if str(item).strip()]
+        if not file_ids or len(file_ids) > 8 or len(set(file_ids)) != len(file_ids):
+            return jsonify({"status": "error", "detail": "Indica entre 1 y 8 IDs únicos por consulta."}), 400
+        service = get_drive_service(token)
+        resultados = []
+        for file_id in file_ids:
+            try:
+                metadata = service.files().get(fileId=file_id,
+                    fields="id,name,mimeType,size", supportsAllDrives=True).execute(num_retries=3)
+                if metadata.get("mimeType") != "application/pdf":
+                    raise ValueError("El archivo no es un PDF.")
+                with tempfile.TemporaryDirectory(prefix="tomo_paginas_") as temp_dir:
+                    tamano = int(metadata.get("size") or 0)
+                    disco_libre = shutil.disk_usage(temp_dir).free
+                    if tamano and tamano + 64 * 1024 * 1024 > disco_libre:
+                        raise RuntimeError("ESPACIO_INSUFICIENTE: no cabe el PDF temporal para contar páginas.")
+                    archivo = download_drive_file_to_path(service, file_id, temp_dir)
+                    intento = subprocess.run(["qpdf", "--show-npages", archivo],
+                        capture_output=True, text=True, timeout=180, check=False)
+                    if intento.returncode not in (0, 3):
+                        raise RuntimeError("qpdf: " + (intento.stderr or intento.stdout or
+                            "no pudo contar las páginas")[-450:])
+                    salida = (intento.stdout or "").strip().splitlines()
+                    paginas = int(salida[-1].strip()) if salida else 0
+                    if paginas < 1:
+                        raise ValueError("El PDF no contiene páginas verificables.")
+                    resultados.append({"id": file_id, "nombre": metadata.get("name", ""),
+                        "paginas": paginas, "error": ""})
+            except Exception as error_pdf:
+                app.logger.warning("TOMOS: fallo conteo de PDF %s: %s", file_id, error_pdf)
+                resultados.append({"id": file_id, "paginas": 0,
+                    "error": str(error_pdf)[:500]})
+        return jsonify({"status": "partial" if any(r["error"] for r in resultados) else "success",
+            "resultados": resultados}), 200
+    except ValueError as error:
+        return jsonify({"status": "error", "detail": str(error)}), 400
+    except Exception as error:
+        app.logger.exception("TOMOS: error general de conteo")
+        return jsonify({"status": "error", "detail": str(error)[:500]}), 500
+
+
 @app.post("/tomos")
 def ensamblar_tomo():
     try:
@@ -1290,12 +1348,13 @@ def ensamblar_tomo():
 
         service = get_drive_service(token)
         with job_semaphore:
-            uploaded, total_pages, errors = assemble_tomo(
-                service=service, source_ids=source_ids, destination_folder_id=str(data["destination_folder_id"]),
-                output_filename=str(data["output_filename"]), replace_existing=as_bool(data.get("replace_existing")),
-                strict_mode=as_bool(data.get("strict_mode", True)), expected_pages=int(data.get("expected_pages") or 0),
-                expected_source_count=int(data.get("expected_source_count") or 0),
-            )
+            with tomos_semaphore:
+                uploaded, total_pages, errors = assemble_tomo(
+                    service=service, source_ids=source_ids, destination_folder_id=str(data["destination_folder_id"]),
+                    output_filename=str(data["output_filename"]), replace_existing=as_bool(data.get("replace_existing")),
+                    strict_mode=as_bool(data.get("strict_mode", True)), expected_pages=int(data.get("expected_pages") or 0),
+                    expected_source_count=int(data.get("expected_source_count") or 0),
+                )
 
         if not uploaded:
             failure = errors[-1] if errors else {"detail": "No se pudo leer ninguna página.", "stage": "unknown"}
