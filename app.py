@@ -7,6 +7,8 @@ import io
 import logging
 import shutil
 import subprocess
+import sys
+import signal
 import os
 import re
 import threading
@@ -988,124 +990,274 @@ def compile_in_parts(
         return parts, errors
 
 
+
+# Solo TOMOS: motor aislado en un subproceso, con presupuesto apropiado para 1 GB.
+# El compilador existente conserva su código y sus dos workers configurados.
+TOMOS_MAX_RSS_MB = min(640, max(128, int(os.getenv("TOMOS_MAX_RSS_MB", "520"))))
+TOMOS_MAX_AS_MB = min(800, max(256, int(os.getenv("TOMOS_MAX_AS_MB", "720"))))
+TOMOS_TOTAL_BUDGET_MB = min(950, max(300, int(os.getenv("TOMOS_TOTAL_BUDGET_MB", "850"))))
+TOMOS_MIN_FREE_MB = max(80, int(os.getenv("TOMOS_MIN_FREE_MB", "170")))
+TOMOS_MAX_SECONDS = max(60, int(os.getenv("TOMOS_MAX_SECONDS", "2400")))
+TOMOS_DISK_RESERVE_MB = max(64, int(os.getenv("TOMOS_DISK_RESERVE_MB", "160")))
+TOMOS_SOURCE_GROUP_SIZE = 2  # Fusión jerárquica: dos entradas consecutivas por operación.
+
+
+def _tomo_rss_mb(pid: int) -> float | None:
+    try:
+        with open(f"/proc/{pid}/status", encoding="ascii") as handle:
+            for line in handle:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def _tomo_cgroup_available_mb() -> float | None:
+    # Descuenta caché 'inactive_file' recuperable, pero mantiene un margen real.
+    current = _read_number_file("/sys/fs/cgroup/memory.current")
+    cap = _read_number_file("/sys/fs/cgroup/memory.max")
+    if current is None or cap is None or cap >= 1 << 60:
+        return None
+    reclaimable = 0
+    try:
+        with open("/sys/fs/cgroup/memory.stat", encoding="ascii") as f:
+            for line in f:
+                if line.startswith("inactive_file "):
+                    reclaimable = int(line.split()[1]); break
+    except (OSError, ValueError, IndexError):
+        pass
+    # No se puede reclamar mas memoria que la actualmente contabilizada.
+    effective_used = max(0, current - min(current, reclaimable))
+    return max(0.0, (cap - effective_used) / 1048576.0)
+
+
+def _tomo_require_disk(directory: str, minimum_mb: int = TOMOS_DISK_RESERVE_MB) -> None:
+    free = shutil.disk_usage(directory).free / 1048576.0
+    if free < minimum_mb:
+        raise RuntimeError(
+            f"DISCO_INSUFICIENTE: solo {free:.0f} MB disponibles; "
+            f"reserva mínima {minimum_mb} MB. No se subió ningún tomo."
+        )
+
+
+def _tomo_run_pdf(command: list[str], stage: str,
+                  progress_callback: ProgressCallback | None = None,
+                  timeout: int = TOMOS_MAX_SECONDS) -> str:
+    """Ejecuta una utilidad PDF fuera del worker Gunicorn, con barreras preventivas.
+
+    RLIMIT_AS es un limite de direcciones virtuales, no una garantía del RSS.
+    El watchdog tambien verifica RSS, cgroup y consumo total observado.
+    """
+    if not command or not shutil.which(command[0]):
+        raise RuntimeError("MOTOR_PDF_NO_INSTALADO: falta " + (command[0] if command else "comando"))
+    wrapper = ("import os,resource,sys;"
+               "n=int(sys.argv[1])*1048576;"
+               "resource.setrlimit(resource.RLIMIT_AS,(n,n));"
+               "os.execv(sys.argv[2],sys.argv[2:])")
+    argv = [sys.executable, "-c", wrapper, str(TOMOS_MAX_AS_MB), *command]
+    start = time.monotonic()
+    with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as stdout, \
+         tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as stderr:
+        proc = subprocess.Popen(argv, stdout=stdout, stderr=stderr,
+                                text=True, start_new_session=True)
+        peak_rss = 0.0
+        latest_diagnostic = {}
+        def stop():
+            if proc.poll() is not None:
+                return
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                return
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                try: os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+                proc.wait()
+        try:
+            while proc.poll() is None:
+                rss = _tomo_rss_mb(proc.pid)
+                if rss is not None: peak_rss = max(peak_rss, rss)
+                snap = tomos_diagnostics()
+                latest_diagnostic = snap
+                cgroup_free = _tomo_cgroup_available_mb()
+                host_rss = float(snap.get("process_rss_mb") or 0)
+                # Cuando no hay cgroup medible, limite de mejor esfuerzo: Python + motor.
+                total_est = host_rss + float(rss or 0)
+                violation = None
+                if rss is not None and rss >= TOMOS_MAX_RSS_MB:
+                    violation = f"Motor PDF {rss:.0f} MB >= límite {TOMOS_MAX_RSS_MB} MB"
+                elif cgroup_free is not None and cgroup_free < TOMOS_MIN_FREE_MB:
+                    violation = f"Reserva del contenedor {cgroup_free:.0f} MB < {TOMOS_MIN_FREE_MB} MB"
+                elif total_est >= TOMOS_TOTAL_BUDGET_MB:
+                    violation = f"Memoria observada Python+motor {total_est:.0f} MB >= {TOMOS_TOTAL_BUDGET_MB} MB"
+                if progress_callback:
+                    progress_callback(stage="merging" if stage.startswith("merging") else stage,
+                                      merge_step=stage, merge_engine="mutool",
+                                      pdf_process_rss_mb=round(rss or 0),
+                                      pdf_process_peak_rss_mb=round(peak_rss),
+                                      cgroup_available_mb=round(cgroup_free) if cgroup_free is not None else None,
+                                      diagnostics=snap)
+                if violation:
+                    stop()
+                    raise RuntimeError(
+                        f"MEMORIA_INSUFICIENTE: {stage}: {violation}. "
+                        f"Pico del motor {peak_rss:.0f} MB. No se subió tomo incompleto. "
+                        "Este PDF podría necesitar más memoria; utiliza el servidor de Colab."
+                    )
+                if time.monotonic() - start > timeout:
+                    stop()
+                    raise RuntimeError(f"TIEMPO_AGOTADO: {stage}, más de {timeout} segundos.")
+                time.sleep(.25)
+        finally:
+            stop()
+        stdout.seek(0); stderr.seek(0)
+        text_out = stdout.read(65536)
+        text_err = stderr.read(65536)[-2000:]
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"MOTOR_PDF_ERROR: {stage}, código {proc.returncode}, "
+                f"pico RSS {peak_rss:.0f} MB, memoria contenedor "
+                f"{latest_diagnostic.get('memory_used_mb')} MB: "
+                + (text_err or text_out or 'sin detalle')[-1200:]
+            )
+        return text_out
+
+
+def _tomo_pdf_count(path: str, progress_callback=None) -> int:
+    pdfinfo = shutil.which("pdfinfo")
+    if not pdfinfo:
+        raise RuntimeError("PDFINFO_NO_INSTALADO: falta poppler-utils en Dockerfile.")
+    info = _tomo_run_pdf([pdfinfo, path], "validating", progress_callback, timeout=180)
+    match = re.search(r"^Pages:\s*(\d+)\s*$", info, re.MULTILINE)
+    if not match or int(match.group(1)) < 1:
+        raise RuntimeError("PDF_INVALIDO: el motor no pudo contar las páginas de " + os.path.basename(path))
+    return int(match.group(1))
+
+
 def assemble_tomo(
     service, source_ids: list[str], destination_folder_id: str,
     output_filename: str, progress_callback: ProgressCallback | None = None,
     replace_existing: bool = False, strict_mode: bool = True,
     expected_pages: int = 0, expected_source_count: int = 0,
 ) -> tuple[dict[str, Any] | None, int, list[dict[str, Any]]]:
-    """Mismo ensamblaje de la versión recibida; añade diagnóstico por etapa.
+    """TOMOS exclusivamente: descarga a disco, une con mutool, verifica y sube.
 
-    Nota: PdfWriter conserva páginas en memoria hasta write(). Con 1 GB un
-    expediente grande podría superar el límite. Esta mejora NO lo evita ni
-    convierte el proceso a MuPDF; registra el motivo cuando Python sobrevive.
+    No rasteriza páginas. NO promete que cualquier expediente se pueda procesar
+    en 1 GB: si rebasa los límites detiene el subproceso y reporta el motivo.
     """
-    if expected_source_count and len(source_ids) != expected_source_count:
-        return None, 0, [{"file_id": "", "stage": "validating", "error_code": "INTEGRIDAD_FUENTES",
-                         "detail": "La cantidad de fuentes recibidas no coincide con la esperada."}]
-
-    writer = PdfWriter()
     errors: list[dict[str, Any]] = []
-    total_pages = 0
     total_files = len(source_ids)
-    last_stage = "queued"
-    last_file_id = ""
-
-    def report(**changes: Any) -> None:
-        nonlocal last_stage, last_file_id
-        last_stage = str(changes.get("stage") or last_stage)
-        last_file_id = str(changes.get("current_file_id") or last_file_id)
-        if progress_callback:
-            progress_callback(**changes)
-
-    with tempfile.TemporaryDirectory(prefix="maestro_tomo_") as temp_dir:
+    if expected_source_count and total_files != expected_source_count:
+        return None, 0, [{"file_id": "", "stage": "validating", "error_code": "INTEGRIDAD_FUENTES",
+                          "detail": "La cantidad de fuentes recibidas no coincide con la esperada."}]
+    if not source_ids:
+        return None, 0, [{"file_id": "", "stage": "validating", "error_code": "PDF_VACIO",
+                          "detail": "No llegaron PDF para este tomo."}]
+    stage = "validating"
+    current_file_id = ""
+    total_pages = 0
+    def report(**kwargs):
+        if progress_callback: progress_callback(**kwargs)
+    with tempfile.TemporaryDirectory(prefix="railway_tomo_mutool_") as temp_dir:
         try:
-            for index, file_id in enumerate(source_ids, start=1):
-                source_handle = None
-                source_path = None
+            if not shutil.which("mutool") or not shutil.which("pdfinfo"):
+                raise RuntimeError("MOTOR_PDF_NO_INSTALADO: Dockerfile debe instalar mupdf-tools y poppler-utils.")
+            pending: list[str] = []
+            pages_by_path: dict[str, int] = {}
+            ids_by_path: dict[str, list[str]] = {}
+            for index, file_id in enumerate(source_ids, 1):
+                current_file_id = str(file_id)
                 stage = "downloading"
-                try:
-                    report(stage="downloading", processed_files=index-1, total_files=total_files,
-                           current_file_id=file_id, diagnostics=tomos_diagnostics())
-                    source_path = download_drive_file_to_path(service, file_id, temp_dir)
-                    stage = "reading"
-                    report(stage="reading", processed_files=index-1, total_files=total_files,
-                           current_file_id=file_id, diagnostics=tomos_diagnostics())
-                    source_handle, reader = open_pdf_reader_path(source_path, file_id)
-                    stage = "merging"
-                    report(stage="merging", processed_files=index-1, total_files=total_files,
-                           current_file_id=file_id, diagnostics=tomos_diagnostics())
-                    for page_index, page in enumerate(reader.pages, start=1):
-                        writer.add_page(page)
-                        total_pages += 1
-                        # La medición periódica no garantiza capturar un OOM abrupto.
-                        if page_index % 25 == 0:
-                            report(stage="merging", processed_files=index-1,
-                                   total_files=total_files, current_file_id=file_id,
-                                   pages_in_current_part=total_pages, diagnostics=tomos_diagnostics())
-                    report(stage="merging", processed_files=index, total_files=total_files,
-                           pages_in_current_part=total_pages, current_file_id=file_id,
-                           diagnostics=tomos_diagnostics())
-                except Exception as exc:
-                    failure = tomo_failure(exc, stage, file_id)
-                    errors.append(failure)
-                    report(stage=stage, processed_files=index, total_files=total_files,
-                           pages_in_current_part=total_pages, current_file_id=file_id,
-                           last_error=failure["detail"], error_code=failure["error_code"],
-                           diagnostics=failure["diagnostics"])
-                    app.logger.error("TOMO ERROR archivo=%s etapa=%s codigo=%s detalle=%s diagnostico=%s",
-                                     file_id, stage, failure["error_code"], failure["detail"], failure["diagnostics"])
-                    if strict_mode:
-                        return None, total_pages, errors
-                finally:
-                    if source_handle:
-                        try:
-                            source_handle.close()
-                        except Exception:
-                            pass
-                    if source_path and os.path.exists(source_path):
-                        try:
-                            os.remove(source_path)
-                        except OSError:
-                            pass
-                if index % GC_COLLECT_EVERY_FILES == 0:
-                    gc.collect()
-
-            # Un TOMO es indivisible: no publicar una versión incompleta,
-            # incluso si un cliente envía strict_mode=false.
-            if errors:
-                return None, total_pages, errors
-            if total_pages == 0:
-                errors.append({"file_id": "", "stage": "validating", "error_code": "PDF_VACIO",
-                               "detail": "Ninguno de los PDF aportó páginas."})
-                return None, 0, errors
-
-            report(stage="validating", processed_files=total_files, total_files=total_files,
-                   pages_in_current_part=total_pages, diagnostics=tomos_diagnostics())
+                _tomo_require_disk(temp_dir)
+                report(stage=stage, processed_files=index - 1, total_files=total_files,
+                       current_file_id=current_file_id, diagnostics=tomos_diagnostics())
+                path = download_drive_file_to_path(service, current_file_id, temp_dir)
+                stage = "reading"
+                _tomo_require_disk(temp_dir)
+                pages = _tomo_pdf_count(path)
+                total_pages += pages
+                pages_by_path[path] = pages
+                ids_by_path[path] = [current_file_id]
+                pending.append(path)
+                report(stage=stage, processed_files=index, total_files=total_files,
+                       current_file_id=current_file_id, pages_in_current_part=total_pages,
+                       diagnostics=tomos_diagnostics())
             if expected_pages and total_pages != expected_pages:
-                errors.append({"file_id": "", "stage": "validating", "error_code": "INTEGRIDAD_PDF",
-                               "detail": f"Integridad: se esperaban {expected_pages} páginas y se obtuvieron {total_pages}."})
-                return None, total_pages, errors
-
-            report(stage="writing", processed_files=total_files, total_files=total_files,
-                   pages_in_current_part=total_pages, diagnostics=tomos_diagnostics())
-            output_path = write_pdf_to_path(writer, temp_dir, "tomo")
-            report(stage="uploading", processed_files=total_files, total_files=total_files,
-                   pages_in_current_part=total_pages, diagnostics=tomos_diagnostics())
-            uploaded = upload_pdf_path(service, output_path, destination_folder_id, output_filename,
+                raise RuntimeError(f"INTEGRIDAD_PDF: se esperaban {expected_pages} páginas y "
+                                   f"las fuentes suman {total_pages}. No se subió nada.")
+            _tomo_require_disk(temp_dir)
+            level = 0
+            while len(pending) > 1:
+                level += 1
+                next_level: list[str] = []
+                groups = [pending[i:i + TOMOS_SOURCE_GROUP_SIZE]
+                          for i in range(0, len(pending), TOMOS_SOURCE_GROUP_SIZE)]
+                for group_number, group in enumerate(groups, 1):
+                    if len(group) == 1:
+                        next_level.append(group[0]); continue
+                    stage = "merging"
+                    block_ids = [fid for input_path in group for fid in ids_by_path[input_path]]
+                    current_file_id = block_ids[0]
+                    block_stage = (f"merging nivel {level}, bloque {group_number}/{len(groups)} "
+                                   f"(fuentes: {', '.join(block_ids[:3])}"
+                                   f"{' ...' if len(block_ids) > 3 else ''})")
+                    source_pages = sum(pages_by_path[p] for p in group)
+                    _tomo_require_disk(temp_dir)
+                    output = os.path.join(temp_dir, f"nivel{level}_bloque{group_number}_{uuid.uuid4().hex}.pdf")
+                    report(stage="merging", merge_step=block_stage, merge_level=level,
+                           merge_block=group_number, merge_total_blocks=len(groups),
+                           processed_files=total_files, total_files=total_files,
+                           merge_engine="mutool", diagnostics=tomos_diagnostics())
+                    _tomo_run_pdf([shutil.which("mutool"), "merge", "-o", output, *group],
+                                  block_stage, progress_callback=report)
+                    if not os.path.isfile(output) or not os.path.getsize(output):
+                        raise RuntimeError("INTEGRIDAD_PDF: mutool no creó el bloque PDF.")
+                    stage = "validating"
+                    actual_pages = _tomo_pdf_count(output)
+                    if actual_pages != source_pages:
+                        raise RuntimeError(f"INTEGRIDAD_PDF: {block_stage}, "
+                                           f"esperadas {source_pages}, obtenidas {actual_pages} páginas.")
+                    next_level.append(output)
+                    pages_by_path[output] = actual_pages
+                    ids_by_path[output] = block_ids
+                    for consumed in group:
+                        # Ningún bloque se borra antes de crear y validar el reemplazo.
+                        try: os.remove(consumed)
+                        except OSError: pass
+                        pages_by_path.pop(consumed, None)
+                        ids_by_path.pop(consumed, None)
+                    _tomo_require_disk(temp_dir)
+                pending = next_level
+            final_path = pending[0]
+            stage = "validating"
+            final_pages = _tomo_pdf_count(final_path)
+            if final_pages != total_pages or (expected_pages and final_pages != expected_pages):
+                raise RuntimeError(f"INTEGRIDAD_PDF: final {final_pages} páginas, "
+                                   f"origen {total_pages}, esperadas {expected_pages}.")
+            stage = "uploading"
+            report(stage=stage, processed_files=total_files, total_files=total_files,
+                   pages_in_current_part=final_pages, diagnostics=tomos_diagnostics())
+            _tomo_require_disk(temp_dir)
+            uploaded = upload_pdf_path(service, final_path, destination_folder_id, output_filename,
                                        replace_existing=replace_existing)
-            uploaded["paginas"] = total_pages
+            uploaded["paginas"] = final_pages
             report(stage="finished", processed_files=total_files, total_files=total_files,
-                   pages_in_current_part=total_pages, diagnostics=tomos_diagnostics())
-            gc.collect()
-            return uploaded, total_pages, errors
+                   pages_in_current_part=final_pages, diagnostics=tomos_diagnostics())
+            return uploaded, final_pages, []
         except Exception as exc:
-            failure = tomo_failure(exc, last_stage, last_file_id)
-            errors.append(failure)
-            report(stage=last_stage, last_error=failure["detail"], error_code=failure["error_code"],
-                   diagnostics=failure["diagnostics"])
-            app.logger.exception("TOMO FALLO FINAL etapa=%s codigo=%s diagnostico=%s",
-                                 last_stage, failure["error_code"], failure["diagnostics"])
+            fail = tomo_failure(exc, stage, current_file_id)
+            if "MEMORIA_INSUFICIENTE" in str(exc) or "MOTOR_PDF_ERROR" in str(exc):
+                fail["error_code"] = ("MEMORIA_INSUFICIENTE" if "MEMORIA_INSUFICIENTE" in str(exc)
+                                      else "MOTOR_PDF_ERROR")
+            errors.append(fail)
+            report(stage=stage, current_file_id=current_file_id,
+                   last_error=fail["detail"], error_code=fail["error_code"],
+                   diagnostics=fail["diagnostics"])
+            app.logger.error("TOMO MUTOOL FALLO etapa=%s codigo=%s detalle=%s", stage,
+                             fail["error_code"], fail["detail"], exc_info=True)
             return None, total_pages, errors
 
 
