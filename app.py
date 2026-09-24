@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import gc
+import errno
+import traceback
 import io
 import logging
 import shutil
@@ -26,11 +28,13 @@ import fitz  # PyMuPDF: ruta especial para PDFs gigantes, sin alterar el flujo n
 # ================================================================
 
 PORT = int(os.getenv("PORT", "8080"))
-MAX_CONCURRENT_JOBS = max(1, int(os.getenv("MAX_CONCURRENT_JOBS", "2")))
+MAX_CONCURRENT_JOBS = max(1, int(os.getenv("MAX_CONCURRENT_JOBS", "1")))
 UPLOAD_CHUNK_SIZE = max(256 * 1024, int(os.getenv("UPLOAD_CHUNK_SIZE", str(4 * 1024 * 1024))))
 JOB_TTL_SECONDS = max(60, int(os.getenv("JOB_TTL_SECONDS", str(6 * 60 * 60))))
 GC_COLLECT_EVERY_FILES = max(5, int(os.getenv("GC_COLLECT_EVERY_FILES", "20")))
 SISTEMA_MAESTRO_KEY = os.getenv("SISTEMA_MAESTRO_KEY", "").strip()
+SERVER_INSTANCE_ID = uuid.uuid4().hex
+SERVER_STARTED_AT = time.time()
 
 # PDFs gigantes: solo activa una ruta alternativa cuando una fuente supera
 # este tamaño. Los PDFs normales siguen usando el compilador actual (pypdf).
@@ -228,6 +232,102 @@ def as_bool(value: Any) -> bool:
 
 
 # ================================================================
+# DIAGNÓSTICO DE TOMOS: MEMORIA / DISCO / TIPO DE ERROR
+# ================================================================
+# Las mediciones son instantáneas y pueden cambiar al salir el proceso.
+# Si Railway finaliza el contenedor (OOM / reinicio), Python no puede
+# emitir una excepción final: en ese caso verificar Metrics y Deploy Logs.
+
+def _read_number_file(path: str) -> int | None:
+    try:
+        with open(path, "r", encoding="ascii") as handle:
+            raw = handle.read().strip()
+        return int(raw) if raw.isdigit() else None
+    except (OSError, ValueError):
+        return None
+
+
+def _memory_events() -> dict[str, int]:
+    try:
+        with open("/sys/fs/cgroup/memory.events", "r", encoding="ascii") as handle:
+            return {key: int(value) for key, value in
+                    (line.strip().split() for line in handle if line.strip())}
+    except (OSError, ValueError):
+        return {}
+
+
+def tomos_diagnostics() -> dict[str, Any]:
+    snapshot: dict[str, Any] = {
+        "server_instance_id": SERVER_INSTANCE_ID,
+        "memory_used_mb": None,
+        "memory_limit_mb": None,
+        "memory_available_mb": None,
+        "process_rss_mb": None,
+        "disk_free_mb": None,
+        "oom_kill_count": None,
+    }
+    used = _read_number_file("/sys/fs/cgroup/memory.current")
+    limit = _read_number_file("/sys/fs/cgroup/memory.max")
+    if used is not None:
+        snapshot["memory_used_mb"] = round(used / 1048576, 1)
+    if limit is not None and limit < (1 << 60):
+        snapshot["memory_limit_mb"] = round(limit / 1048576, 1)
+        if used is not None:
+            snapshot["memory_available_mb"] = round(max(0, limit - used) / 1048576, 1)
+    try:
+        with open("/proc/self/status", "r", encoding="ascii") as handle:
+            for line in handle:
+                if line.startswith("VmRSS:"):
+                    snapshot["process_rss_mb"] = round(int(line.split()[1]) / 1024, 1)
+                    break
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        snapshot["disk_free_mb"] = round(shutil.disk_usage(tempfile.gettempdir()).free / 1048576, 1)
+    except OSError:
+        pass
+    events = _memory_events()
+    if "oom_kill" in events:
+        snapshot["oom_kill_count"] = events["oom_kill"]
+    return snapshot
+
+
+def classify_tomos_error(exc: Exception, stage: str = "") -> str:
+    message = str(exc).lower()
+    if isinstance(exc, MemoryError) or "cannot allocate memory" in message or "out of memory" in message:
+        return "MEMORIA_INSUFICIENTE"
+    if isinstance(exc, OSError) and getattr(exc, "errno", None) == errno.ENOSPC:
+        return "DISCO_INSUFICIENTE"
+    if "no space left" in message:
+        return "DISCO_INSUFICIENTE"
+    if isinstance(exc, (TimeoutError, subprocess.TimeoutExpired)) or "timed out" in message or "timeout" in message:
+        return "TIEMPO_AGOTADO"
+    if "integridad" in message or "se esperaban" in message and "página" in message:
+        return "INTEGRIDAD_PDF"
+    if "password" in message or "contraseña" in message or "encrypted" in message:
+        return "PDF_PROTEGIDO"
+    if "404" in message or "not found" in message or "no existe" in message:
+        return "ARCHIVO_NO_ENCONTRADO"
+    if "403" in message or "permission" in message or "acceso" in message:
+        return "ACCESO_DRIVE"
+    if stage in ("reading", "merging"):
+        return "PDF_LECTURA_O_FUSION"
+    if stage in ("downloading", "uploading"):
+        return "GOOGLE_DRIVE"
+    return "ERROR_PROCESAMIENTO"
+
+
+def tomo_failure(exc: Exception, stage: str, file_id: str = "") -> dict[str, Any]:
+    return {
+        "file_id": file_id,
+        "stage": stage or "desconocida",
+        "error_code": classify_tomos_error(exc, stage),
+        "detail": str(exc)[:1400] or type(exc).__name__,
+        "diagnostics": tomos_diagnostics(),
+    }
+
+
+# ================================================================
 # ALMACÉN DE TRABAJOS ASÍNCRONOS
 # ================================================================
 
@@ -286,6 +386,7 @@ def create_or_reuse_job(*, job_type: str, request_id: str, token: str, payload: 
                 "total_files": len(payload.get("file_ids") or []),
                 "parts_created": 0,
                 "pages_in_current_part": 0,
+                "stage": "queued",
             },
         }
         if normalized_request_id:
@@ -309,6 +410,7 @@ def get_public_job(job_id: str) -> dict[str, Any] | None:
             "progress": dict(job.get("progress") or {}),
             "created_at": job.get("created_at"),
             "updated_at": job.get("updated_at"),
+            "server_instance_id": SERVER_INSTANCE_ID,
         }
         result = job.get("result")
         if isinstance(result, dict):
@@ -889,73 +991,125 @@ def assemble_tomo(
     output_filename: str, progress_callback: ProgressCallback | None = None,
     replace_existing: bool = False, strict_mode: bool = True,
     expected_pages: int = 0, expected_source_count: int = 0,
-) -> tuple[dict[str, Any] | None, int, list[dict[str, str]]]:
+) -> tuple[dict[str, Any] | None, int, list[dict[str, Any]]]:
+    """Mismo ensamblaje de la versión recibida; añade diagnóstico por etapa.
+
+    Nota: PdfWriter conserva páginas en memoria hasta write(). Con 1 GB un
+    expediente grande podría superar el límite. Esta mejora NO lo evita ni
+    convierte el proceso a MuPDF; registra el motivo cuando Python sobrevive.
+    """
     if expected_source_count and len(source_ids) != expected_source_count:
-        return None, 0, [{"file_id": "", "detail": "La cantidad de fuentes recibidas no coincide con la esperada."}]
+        return None, 0, [{"file_id": "", "stage": "validating", "error_code": "INTEGRIDAD_FUENTES",
+                         "detail": "La cantidad de fuentes recibidas no coincide con la esperada."}]
 
     writer = PdfWriter()
-    errors: list[dict[str, str]] = []
+    errors: list[dict[str, Any]] = []
     total_pages = 0
     total_files = len(source_ids)
+    last_stage = "queued"
+    last_file_id = ""
 
     def report(**changes: Any) -> None:
+        nonlocal last_stage, last_file_id
+        last_stage = str(changes.get("stage") or last_stage)
+        last_file_id = str(changes.get("current_file_id") or last_file_id)
         if progress_callback:
             progress_callback(**changes)
 
     with tempfile.TemporaryDirectory(prefix="maestro_tomo_") as temp_dir:
-        for index, file_id in enumerate(source_ids, start=1):
-            source_handle = None
-            source_path = None
-            try:
-                source_path = download_drive_file_to_path(service, file_id, temp_dir)
-                source_handle, reader = open_pdf_reader_path(source_path, file_id)
-                for page in reader.pages:
-                    writer.add_page(page)
-                    total_pages += 1
-                report(processed_files=index, total_files=total_files, pages_in_current_part=total_pages, current_file_id=file_id)
-            except Exception as exc:
-                errors.append({"file_id": file_id, "detail": str(exc)})
-                report(processed_files=index, total_files=total_files, pages_in_current_part=total_pages, current_file_id=file_id, last_error=str(exc))
-                if strict_mode:
-                    return None, total_pages, errors
-            finally:
-                if source_handle:
-                    try:
-                        source_handle.close()
-                    except Exception:
-                        pass
-                if source_path and os.path.exists(source_path):
-                    try:
-                        os.remove(source_path)
-                    except Exception:
-                        pass
+        try:
+            for index, file_id in enumerate(source_ids, start=1):
+                source_handle = None
+                source_path = None
+                stage = "downloading"
+                try:
+                    report(stage="downloading", processed_files=index-1, total_files=total_files,
+                           current_file_id=file_id, diagnostics=tomos_diagnostics())
+                    source_path = download_drive_file_to_path(service, file_id, temp_dir)
+                    stage = "reading"
+                    report(stage="reading", processed_files=index-1, total_files=total_files,
+                           current_file_id=file_id, diagnostics=tomos_diagnostics())
+                    source_handle, reader = open_pdf_reader_path(source_path, file_id)
+                    stage = "merging"
+                    report(stage="merging", processed_files=index-1, total_files=total_files,
+                           current_file_id=file_id, diagnostics=tomos_diagnostics())
+                    for page_index, page in enumerate(reader.pages, start=1):
+                        writer.add_page(page)
+                        total_pages += 1
+                        # La medición periódica no garantiza capturar un OOM abrupto.
+                        if page_index % 25 == 0:
+                            report(stage="merging", processed_files=index-1,
+                                   total_files=total_files, current_file_id=file_id,
+                                   pages_in_current_part=total_pages, diagnostics=tomos_diagnostics())
+                    report(stage="merging", processed_files=index, total_files=total_files,
+                           pages_in_current_part=total_pages, current_file_id=file_id,
+                           diagnostics=tomos_diagnostics())
+                except Exception as exc:
+                    failure = tomo_failure(exc, stage, file_id)
+                    errors.append(failure)
+                    report(stage=stage, processed_files=index, total_files=total_files,
+                           pages_in_current_part=total_pages, current_file_id=file_id,
+                           last_error=failure["detail"], error_code=failure["error_code"],
+                           diagnostics=failure["diagnostics"])
+                    app.logger.error("TOMO ERROR archivo=%s etapa=%s codigo=%s detalle=%s diagnostico=%s",
+                                     file_id, stage, failure["error_code"], failure["detail"], failure["diagnostics"])
+                    if strict_mode:
+                        return None, total_pages, errors
+                finally:
+                    if source_handle:
+                        try:
+                            source_handle.close()
+                        except Exception:
+                            pass
+                    if source_path and os.path.exists(source_path):
+                        try:
+                            os.remove(source_path)
+                        except OSError:
+                            pass
+                if index % GC_COLLECT_EVERY_FILES == 0:
+                    gc.collect()
 
-            if index % GC_COLLECT_EVERY_FILES == 0:
-                gc.collect()
+            # Un TOMO es indivisible: no publicar una versión incompleta,
+            # incluso si un cliente envía strict_mode=false.
+            if errors:
+                return None, total_pages, errors
+            if total_pages == 0:
+                errors.append({"file_id": "", "stage": "validating", "error_code": "PDF_VACIO",
+                               "detail": "Ninguno de los PDF aportó páginas."})
+                return None, 0, errors
 
-        if total_pages == 0:
-            return None, 0, errors
+            report(stage="validating", processed_files=total_files, total_files=total_files,
+                   pages_in_current_part=total_pages, diagnostics=tomos_diagnostics())
+            if expected_pages and total_pages != expected_pages:
+                errors.append({"file_id": "", "stage": "validating", "error_code": "INTEGRIDAD_PDF",
+                               "detail": f"Integridad: se esperaban {expected_pages} páginas y se obtuvieron {total_pages}."})
+                return None, total_pages, errors
 
-        if expected_pages and total_pages != expected_pages:
-            errors.append({"file_id": "", "detail": f"Integridad: se esperaban {expected_pages} páginas y se obtuvieron {total_pages}."})
+            report(stage="writing", processed_files=total_files, total_files=total_files,
+                   pages_in_current_part=total_pages, diagnostics=tomos_diagnostics())
+            output_path = write_pdf_to_path(writer, temp_dir, "tomo")
+            report(stage="uploading", processed_files=total_files, total_files=total_files,
+                   pages_in_current_part=total_pages, diagnostics=tomos_diagnostics())
+            uploaded = upload_pdf_path(service, output_path, destination_folder_id, output_filename,
+                                       replace_existing=replace_existing)
+            uploaded["paginas"] = total_pages
+            report(stage="finished", processed_files=total_files, total_files=total_files,
+                   pages_in_current_part=total_pages, diagnostics=tomos_diagnostics())
+            gc.collect()
+            return uploaded, total_pages, errors
+        except Exception as exc:
+            failure = tomo_failure(exc, last_stage, last_file_id)
+            errors.append(failure)
+            report(stage=last_stage, last_error=failure["detail"], error_code=failure["error_code"],
+                   diagnostics=failure["diagnostics"])
+            app.logger.exception("TOMO FALLO FINAL etapa=%s codigo=%s diagnostico=%s",
+                                 last_stage, failure["error_code"], failure["diagnostics"])
             return None, total_pages, errors
-
-        output_path = write_pdf_to_path(writer, temp_dir, "tomo")
-        uploaded = upload_pdf_path(service, output_path, destination_folder_id, output_filename, replace_existing=replace_existing)
-        uploaded["paginas"] = total_pages
-
-        if os.path.exists(output_path):
-            try:
-                os.remove(output_path)
-            except Exception:
-                pass
-
-        gc.collect()
-        return uploaded, total_pages, errors
 
 
 def run_background_job(job_id: str, job_type: str, token: str, payload: dict[str, Any]) -> None:
     update_job(job_id, job_state="running", status="running")
+    update_job_progress(job_id, stage="initializing", diagnostics=tomos_diagnostics() if job_type == "tomos" else {})
     try:
         with job_semaphore:
             service = get_drive_service(token)
@@ -1005,9 +1159,12 @@ def run_background_job(job_id: str, job_type: str, token: str, payload: dict[str
                 )
 
                 if not uploaded:
+                    failure = errors[-1] if errors else {"detail": "No se pudo leer ninguna página.",
+                                                        "stage": "unknown", "error_code": "ERROR_PROCESAMIENTO"}
                     update_job(job_id, job_state="failed", status="error",
-                               detail=(errors[-1].get("detail") if errors else "No se pudo leer ninguna página."),
-                               result={"errores": errors})
+                               detail=failure["detail"],
+                               result={"errores": errors, "error_code": failure.get("error_code"),
+                                       "stage": failure.get("stage"), "diagnostics": failure.get("diagnostics")})
                     return
 
                 final_status = "partial" if errors else "success"
@@ -1019,7 +1176,15 @@ def run_background_job(job_id: str, job_type: str, token: str, payload: dict[str
 
     except Exception as exc:
         app.logger.exception("Error crítico en trabajo %s", job_id)
-        update_job(job_id, job_state="failed", status="error", detail=str(exc))
+        if job_type == "tomos":
+            with jobs_lock:
+                stage = str((jobs.get(job_id) or {}).get("progress", {}).get("stage") or "unknown")
+            failure = tomo_failure(exc, stage)
+            update_job(job_id, job_state="failed", status="error", detail=failure["detail"],
+                       result={"errores": [failure], "stage": failure["stage"],
+                               "error_code": failure["error_code"], "diagnostics": failure["diagnostics"]})
+        else:
+            update_job(job_id, job_state="failed", status="error", detail=str(exc))
     finally:
         gc.collect()
 
@@ -1037,7 +1202,9 @@ def health():
     cleanup_expired_jobs()
     with jobs_lock:
         active_jobs = sum(1 for job in jobs.values() if job.get("job_state") in {"queued", "running"})
-    return jsonify({"status": "ok", "service": "sistema-maestro-pdf", "max_concurrent_jobs": MAX_CONCURRENT_JOBS, "active_jobs": active_jobs}), 200
+    return jsonify({"status": "ok", "service": "sistema-maestro-pdf", "max_concurrent_jobs": MAX_CONCURRENT_JOBS,
+                    "active_jobs": active_jobs, "server_instance_id": SERVER_INSTANCE_ID,
+                    "started_at": SERVER_STARTED_AT}), 200
 
 
 @app.get("/trabajos/<job_id>")
@@ -1046,7 +1213,10 @@ def consultar_trabajo(job_id: str):
         get_bearer_token()
         public_job = get_public_job(str(job_id).strip())
         if not public_job:
-            return jsonify({"status": "error", "job_state": "not_found", "detail": "Trabajo no encontrado o vencido."}), 404
+            return jsonify({"status": "error", "job_state": "not_found", "server_instance_id": SERVER_INSTANCE_ID,
+                            "detail": "Trabajo no encontrado en esta instancia. Puede haber vencido o el servidor reinició; "
+                                      "revisa los registros de Railway para conocer la causa. "
+                                      "Un 404 por sí solo no demuestra falta de memoria."}), 404
         return jsonify(public_job), 200
     except ValueError as exc:
         return jsonify({"status": "error", "detail": str(exc)}), 400
@@ -1128,7 +1298,10 @@ def ensamblar_tomo():
             )
 
         if not uploaded:
-            return jsonify({"status": "error", "detail": (errors[-1].get("detail") if errors else "No se pudo leer ninguna página."), "errores": errors}), 422
+            failure = errors[-1] if errors else {"detail": "No se pudo leer ninguna página.", "stage": "unknown"}
+            return jsonify({"status": "error", "detail": failure["detail"],
+                            "stage": failure.get("stage"), "error_code": failure.get("error_code"),
+                            "diagnostics": failure.get("diagnostics"), "errores": errors}), 422
         return jsonify({"status": "partial" if errors else "success", "message": "Tomo ensamblado.", "id": uploaded["id"],
                         "url": uploaded["url"], "final_name": uploaded["final_name"], "paginas": total_pages, "errores": errors}), 200
 
@@ -1136,7 +1309,10 @@ def ensamblar_tomo():
         return jsonify({"status": "error", "detail": str(exc)}), 400
     except Exception as exc:
         app.logger.exception("Error crítico en /tomos")
-        return jsonify({"status": "error", "detail": str(exc)}), 500
+        failure = tomo_failure(exc, "request")
+        return jsonify({"status": "error", "detail": failure["detail"], "stage": failure["stage"],
+                        "error_code": failure["error_code"], "diagnostics": failure["diagnostics"],
+                        "errores": [failure]}), 500
 
 
 if __name__ == "__main__":
