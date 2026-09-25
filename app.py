@@ -993,9 +993,9 @@ def compile_in_parts(
 
 # Solo TOMOS: motor aislado en un subproceso, con presupuesto apropiado para 1 GB.
 # El compilador existente conserva su código y sus dos workers configurados.
-TOMOS_MAX_RSS_MB = min(640, max(128, int(os.getenv("TOMOS_MAX_RSS_MB", "520"))))
-TOMOS_MAX_AS_MB = min(800, max(256, int(os.getenv("TOMOS_MAX_AS_MB", "720"))))
-TOMOS_TOTAL_BUDGET_MB = min(950, max(300, int(os.getenv("TOMOS_TOTAL_BUDGET_MB", "850"))))
+TOMOS_MAX_RSS_MB = min(700, max(128, int(os.getenv("TOMOS_MAX_RSS_MB", "600"))))
+TOMOS_MAX_AS_MB = min(850, max(256, int(os.getenv("TOMOS_MAX_AS_MB", "780"))))
+TOMOS_TOTAL_BUDGET_MB = min(900, max(300, int(os.getenv("TOMOS_TOTAL_BUDGET_MB", "830"))))
 TOMOS_MIN_FREE_MB = max(80, int(os.getenv("TOMOS_MIN_FREE_MB", "170")))
 TOMOS_MAX_SECONDS = max(60, int(os.getenv("TOMOS_MAX_SECONDS", "2400")))
 TOMOS_DISK_RESERVE_MB = max(64, int(os.getenv("TOMOS_DISK_RESERVE_MB", "160")))
@@ -1043,12 +1043,14 @@ def _tomo_require_disk(directory: str, minimum_mb: int = TOMOS_DISK_RESERVE_MB) 
 
 def _tomo_run_pdf(command: list[str], stage: str,
                   progress_callback: ProgressCallback | None = None,
-                  timeout: int = TOMOS_MAX_SECONDS) -> str:
+                  timeout: int = TOMOS_MAX_SECONDS,
+                  engine: str | None = None) -> str:
     """Ejecuta una utilidad PDF fuera del worker Gunicorn, con barreras preventivas.
 
     RLIMIT_AS es un limite de direcciones virtuales, no una garantía del RSS.
     El watchdog tambien verifica RSS, cgroup y consumo total observado.
     """
+    engine_name = str(engine or (os.path.basename(command[0]) if command else "motor-pdf")).strip()
     if not command or not shutil.which(command[0]):
         raise RuntimeError("MOTOR_PDF_NO_INSTALADO: falta " + (command[0] if command else "comando"))
     wrapper = ("import os,resource,sys;"
@@ -1095,7 +1097,7 @@ def _tomo_run_pdf(command: list[str], stage: str,
                     violation = f"Memoria observada Python+motor {total_est:.0f} MB >= {TOMOS_TOTAL_BUDGET_MB} MB"
                 if progress_callback:
                     progress_callback(stage="merging" if stage.startswith("merging") else stage,
-                                      merge_step=stage, merge_engine="mutool",
+                                      merge_step=stage, merge_engine=engine_name,
                                       pdf_process_rss_mb=round(rss or 0),
                                       pdf_process_peak_rss_mb=round(peak_rss),
                                       cgroup_available_mb=round(cgroup_free) if cgroup_free is not None else None,
@@ -1103,7 +1105,7 @@ def _tomo_run_pdf(command: list[str], stage: str,
                 if violation:
                     stop()
                     raise RuntimeError(
-                        f"MEMORIA_INSUFICIENTE: {stage}: {violation}. "
+                        f"MEMORIA_INSUFICIENTE: {stage}: {engine_name}: {violation}. "
                         f"Pico del motor {peak_rss:.0f} MB. No se subió tomo incompleto. "
                         "Este PDF podría necesitar más memoria; utiliza el servidor de Colab."
                     )
@@ -1118,7 +1120,7 @@ def _tomo_run_pdf(command: list[str], stage: str,
         text_err = stderr.read(65536)[-2000:]
         if proc.returncode != 0:
             raise RuntimeError(
-                f"MOTOR_PDF_ERROR: {stage}, código {proc.returncode}, "
+                f"MOTOR_PDF_ERROR: {stage}, motor {engine_name}, código {proc.returncode}, "
                 f"pico RSS {peak_rss:.0f} MB, memoria contenedor "
                 f"{latest_diagnostic.get('memory_used_mb')} MB: "
                 + (text_err or text_out or 'sin detalle')[-1200:]
@@ -1135,6 +1137,100 @@ def _tomo_pdf_count(path: str, progress_callback=None) -> int:
     if not match or int(match.group(1)) < 1:
         raise RuntimeError("PDF_INVALIDO: el motor no pudo contar las páginas de " + os.path.basename(path))
     return int(match.group(1))
+
+
+def _tomo_merge_group_with_fallback(
+    group: list[str],
+    output: str,
+    source_pages: int,
+    block_stage: str,
+    progress_callback: ProgressCallback | None = None,
+) -> tuple[int, str]:
+    """Une un bloque con MuPDF y usa pdfunite como segundo motor.
+
+    Ambos motores se ejecutan bajo las mismas barreras de memoria. El archivo
+    solo se acepta si existe y conserva exactamente la cantidad de páginas.
+    """
+    mutool = shutil.which("mutool")
+    pdfunite = shutil.which("pdfunite")
+    if not mutool:
+        raise RuntimeError("MOTOR_PDF_NO_INSTALADO: falta mutool (mupdf-tools).")
+    if not pdfunite:
+        raise RuntimeError("MOTOR_PDF_NO_INSTALADO: falta pdfunite (poppler-utils).")
+
+    errores: list[str] = []
+    intentos = [
+        ("mutool", [mutool, "merge", "-o", output, *group]),
+        ("pdfunite", [pdfunite, *group, output]),
+    ]
+
+    for indice, (engine, command) in enumerate(intentos, start=1):
+        try:
+            if os.path.exists(output):
+                try:
+                    os.remove(output)
+                except OSError:
+                    pass
+
+            if progress_callback:
+                progress_callback(
+                    stage="merging",
+                    merge_step=block_stage,
+                    merge_engine=engine,
+                    merge_attempt=indice,
+                    merge_total_attempts=len(intentos),
+                    diagnostics=tomos_diagnostics(),
+                )
+
+            _tomo_run_pdf(
+                command,
+                block_stage,
+                progress_callback=progress_callback,
+                engine=engine,
+            )
+
+            if not os.path.isfile(output) or os.path.getsize(output) <= 0:
+                raise RuntimeError(
+                    f"INTEGRIDAD_PDF: {engine} no creó un bloque PDF válido."
+                )
+
+            actual_pages = _tomo_pdf_count(
+                output,
+                progress_callback=progress_callback,
+            )
+            if actual_pages != source_pages:
+                raise RuntimeError(
+                    f"INTEGRIDAD_PDF: {block_stage}, motor {engine}, "
+                    f"esperadas {source_pages}, obtenidas {actual_pages} páginas."
+                )
+
+            return actual_pages, engine
+
+        except Exception as exc:
+            errores.append(f"{engine}: {exc}")
+            if os.path.exists(output):
+                try:
+                    os.remove(output)
+                except OSError:
+                    pass
+
+            if indice < len(intentos):
+                if progress_callback:
+                    progress_callback(
+                        stage="merging",
+                        merge_step=block_stage,
+                        merge_engine="fallback-pdfunite",
+                        last_error=str(exc),
+                        diagnostics=tomos_diagnostics(),
+                    )
+                gc.collect()
+                time.sleep(0.35)
+                continue
+            break
+
+    raise RuntimeError(
+        "FUSION_MOTORES_FALLIDA: " + block_stage + ". " + " | ".join(errores)
+    )
 
 
 def assemble_tomo(
@@ -1211,15 +1307,17 @@ def assemble_tomo(
                            merge_block=group_number, merge_total_blocks=len(groups),
                            processed_files=total_files, total_files=total_files,
                            merge_engine="mutool", diagnostics=tomos_diagnostics())
-                    _tomo_run_pdf([shutil.which("mutool"), "merge", "-o", output, *group],
-                                  block_stage, progress_callback=report)
-                    if not os.path.isfile(output) or not os.path.getsize(output):
-                        raise RuntimeError("INTEGRIDAD_PDF: mutool no creó el bloque PDF.")
+                    actual_pages, motor_usado = _tomo_merge_group_with_fallback(
+                        group=group,
+                        output=output,
+                        source_pages=source_pages,
+                        block_stage=block_stage,
+                        progress_callback=report,
+                    )
                     stage = "validating"
-                    actual_pages = _tomo_pdf_count(output)
-                    if actual_pages != source_pages:
-                        raise RuntimeError(f"INTEGRIDAD_PDF: {block_stage}, "
-                                           f"esperadas {source_pages}, obtenidas {actual_pages} páginas.")
+                    report(stage=stage, merge_step=block_stage, merge_engine=motor_usado,
+                           processed_files=total_files, total_files=total_files,
+                           diagnostics=tomos_diagnostics())
                     next_level.append(output)
                     pages_by_path[output] = actual_pages
                     ids_by_path[output] = block_ids
@@ -1249,9 +1347,11 @@ def assemble_tomo(
             return uploaded, final_pages, []
         except Exception as exc:
             fail = tomo_failure(exc, stage, current_file_id)
-            if "MEMORIA_INSUFICIENTE" in str(exc) or "MOTOR_PDF_ERROR" in str(exc):
-                fail["error_code"] = ("MEMORIA_INSUFICIENTE" if "MEMORIA_INSUFICIENTE" in str(exc)
-                                      else "MOTOR_PDF_ERROR")
+            detalle_exc = str(exc)
+            if "MEMORIA_INSUFICIENTE" in detalle_exc:
+                fail["error_code"] = "MEMORIA_INSUFICIENTE"
+            elif "MOTOR_PDF_ERROR" in detalle_exc or "FUSION_MOTORES_FALLIDA" in detalle_exc:
+                fail["error_code"] = "MOTOR_PDF_ERROR"
             errors.append(fail)
             report(stage=stage, current_file_id=current_file_id,
                    last_error=fail["detail"], error_code=fail["error_code"],
