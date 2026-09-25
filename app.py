@@ -993,10 +993,12 @@ def compile_in_parts(
 
 # Solo TOMOS: motor aislado en un subproceso, con presupuesto apropiado para 1 GB.
 # El compilador existente conserva su código y sus dos workers configurados.
-TOMOS_MAX_RSS_MB = min(700, max(128, int(os.getenv("TOMOS_MAX_RSS_MB", "600"))))
-TOMOS_MAX_AS_MB = min(850, max(256, int(os.getenv("TOMOS_MAX_AS_MB", "780"))))
-TOMOS_TOTAL_BUDGET_MB = min(900, max(300, int(os.getenv("TOMOS_TOTAL_BUDGET_MB", "830"))))
-TOMOS_MIN_FREE_MB = max(80, int(os.getenv("TOMOS_MIN_FREE_MB", "170")))
+# Railway 1 GB: el motor puede llegar a ~700 MB en PDFs difíciles, pero
+# mantenemos barreras globales para no tumbar el worker de Gunicorn.
+TOMOS_MAX_RSS_MB = min(760, max(128, int(os.getenv("TOMOS_MAX_RSS_MB", "720"))))
+TOMOS_MAX_AS_MB = min(900, max(256, int(os.getenv("TOMOS_MAX_AS_MB", "850"))))
+TOMOS_TOTAL_BUDGET_MB = min(900, max(300, int(os.getenv("TOMOS_TOTAL_BUDGET_MB", "850"))))
+TOMOS_MIN_FREE_MB = max(100, int(os.getenv("TOMOS_MIN_FREE_MB", "150")))
 TOMOS_MAX_SECONDS = max(60, int(os.getenv("TOMOS_MAX_SECONDS", "2400")))
 TOMOS_DISK_RESERVE_MB = max(64, int(os.getenv("TOMOS_DISK_RESERVE_MB", "160")))
 TOMOS_SOURCE_GROUP_SIZE = 2  # Fusión jerárquica: dos entradas consecutivas por operación.
